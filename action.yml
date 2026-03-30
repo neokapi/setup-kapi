@@ -1,0 +1,88 @@
+name: "Setup Kapi CLI"
+description: "Install the kapi CLI for CI workflows — downloads, verifies, caches, and configures the binary"
+branding:
+  icon: "globe"
+  color: "blue"
+
+inputs:
+  version:
+    description: "Kapi CLI version (e.g. '0.5.0' or 'latest')"
+    required: false
+    default: "latest"
+  token:
+    description: "GitHub token with read access to neokapi/neokapi releases"
+    required: true
+
+outputs:
+  version:
+    description: "Installed kapi CLI version (e.g. '0.5.0')"
+    value: ${{ steps.resolve.outputs.version }}
+
+runs:
+  using: "composite"
+  steps:
+    # 1. Resolve version
+    - name: Resolve version
+      id: resolve
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        INPUT_VERSION: ${{ inputs.version }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        VERSION=$("${ACTION_PATH}/scripts/resolve-version.sh" "${INPUT_VERSION}")
+        echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+        echo "Resolved version: ${VERSION}"
+
+    # 2. Detect platform
+    - name: Detect platform
+      id: platform
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        source "${ACTION_PATH}/scripts/platform.sh"
+        echo "os=${GOOS}" >> "$GITHUB_OUTPUT"
+        echo "arch=${GOARCH}" >> "$GITHUB_OUTPUT"
+        echo "ext=${ARCHIVE_EXT}" >> "$GITHUB_OUTPUT"
+        echo "Platform: ${GOOS}/${GOARCH} (archive: .${ARCHIVE_EXT})"
+
+    # 3. Restore binary cache
+    - name: Restore binary cache
+      id: binary-cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/setup-kapi
+        key: kapi-${{ steps.resolve.outputs.version }}-${{ runner.os }}-${{ runner.arch }}
+
+    # 4. Download + verify (on cache miss)
+    - name: Download and verify
+      if: steps.binary-cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        ACTION_PATH: ${{ github.action_path }}
+        VERSION: ${{ steps.resolve.outputs.version }}
+        PLATFORM_OS: ${{ steps.platform.outputs.os }}
+        PLATFORM_ARCH: ${{ steps.platform.outputs.arch }}
+        PLATFORM_EXT: ${{ steps.platform.outputs.ext }}
+        INSTALL_DIR: ${{ runner.temp }}/setup-kapi
+      run: |
+        "${ACTION_PATH}/scripts/download-verify.sh" \
+          "${VERSION}" \
+          "${PLATFORM_OS}" \
+          "${PLATFORM_ARCH}" \
+          "${PLATFORM_EXT}" \
+          "${INSTALL_DIR}"
+
+    # 5. Add to PATH
+    - name: Add to PATH
+      shell: bash
+      env:
+        INSTALL_DIR: ${{ runner.temp }}/setup-kapi
+      run: echo "${INSTALL_DIR}" >> "$GITHUB_PATH"
+
+    # 6. Verify installation
+    - name: Verify installation
+      shell: bash
+      run: kapi version

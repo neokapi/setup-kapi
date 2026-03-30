@@ -1,0 +1,98 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-latest:
+    name: "Latest (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup kapi (latest)
+        id: setup
+        uses: ./
+        with:
+          token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+
+      - name: Verify version output
+        shell: bash
+        env:
+          INSTALLED_VERSION: ${{ steps.setup.outputs.version }}
+        run: |
+          echo "Installed version: ${INSTALLED_VERSION}"
+          test -n "${INSTALLED_VERSION}"
+
+      - name: Verify kapi is on PATH
+        shell: bash
+        run: kapi version
+
+  test-pinned:
+    name: "Pinned version (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get latest version for pinned test
+        id: version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+        run: |
+          TAG=$(gh api repos/neokapi/neokapi/releases/latest --jq .tag_name)
+          VERSION="${TAG#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup kapi (pinned)
+        id: setup
+        uses: ./
+        with:
+          token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+          version: ${{ steps.version.outputs.version }}
+
+      - name: Verify correct version
+        shell: bash
+        env:
+          EXPECTED: ${{ steps.version.outputs.version }}
+          ACTUAL: ${{ steps.setup.outputs.version }}
+        run: |
+          echo "Expected: ${EXPECTED}, Actual: ${ACTUAL}"
+          test "${EXPECTED}" = "${ACTUAL}"
+
+  test-cache:
+    name: "Cache hit (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      # First install — populates cache
+      - name: Setup kapi (first)
+        uses: ./
+        with:
+          token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+
+      # Second install — should hit cache
+      - name: Setup kapi (cached)
+        uses: ./
+        with:
+          token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+
+      - name: Verify kapi works from cache
+        shell: bash
+        run: kapi version
