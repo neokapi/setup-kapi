@@ -2,7 +2,7 @@
 
 GitHub Action for installing the [kapi CLI](https://github.com/neokapi/neokapi) in CI workflows.
 
-Downloads the correct binary for the runner platform, verifies SHA-256 checksums, and caches between runs.
+Downloads the correct binary for the runner platform, verifies SHA-256 checksums, caches between runs, and optionally installs kapi plugins (such as the bowrain plugin, `kapi-bowrain`) and configures server authentication.
 
 ## Usage
 
@@ -11,9 +11,9 @@ Downloads the correct binary for the runner platform, verifies SHA-256 checksums
 ```yaml
 steps:
   - uses: neokapi/setup-kapi@v1
-    with:
-      token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
 ```
+
+The built-in `GITHUB_TOKEN` is used by default for release downloads, so no token input is required.
 
 ### Pinned version
 
@@ -21,8 +21,7 @@ steps:
 steps:
   - uses: neokapi/setup-kapi@v1
     with:
-      token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
-      version: "0.5.0"
+      version: "1.0.0"
 ```
 
 ### Run a localization pipeline
@@ -30,24 +29,41 @@ steps:
 ```yaml
 steps:
   - uses: neokapi/setup-kapi@v1
-    with:
-      token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
 
   - run: kapi run
 ```
+
+### With the bowrain plugin and server auth
+
+```yaml
+steps:
+  - uses: neokapi/setup-kapi@v1
+    with:
+      plugins: kapi-bowrain
+      auth-token: ${{ secrets.BOWRAIN_AUTH_TOKEN }}
+      server: https://your.bowrain.server
+
+  - run: kapi sync
+```
+
+To run the full sync-and-commit flow, pair this with [`kapi-action`](https://github.com/neokapi/kapi-action).
 
 ## Inputs
 
 | Input | Description | Default | Required |
 |-------|-------------|---------|----------|
-| `version` | Kapi CLI version (e.g. `0.5.0` or `latest`) | `latest` | No |
-| `token` | GitHub token with read access to `neokapi/neokapi` releases | — | Yes |
+| `version` | Kapi CLI version (e.g. `1.0.0` or `latest`) | `latest` | No |
+| `token` | GitHub token for release downloads and API rate limits | `${{ github.token }}` | No |
+| `plugins` | Newline- or comma-separated plugin refs to install (e.g. `kapi-bowrain`) | — | No |
+| `auth-token` | Bowrain server JWT, exported as `BOWRAIN_AUTH_TOKEN` | — | No |
+| `server` | Bowrain server URL, exported as `BOWRAIN_SERVER_URL` | — | No |
 
 ## Outputs
 
 | Output | Description |
 |--------|-------------|
-| `version` | Installed version (e.g. `0.5.0`) |
+| `version` | Installed version (e.g. `1.0.0`) |
+| `cache-hit` | Whether the plugin cache was hit |
 
 ## How it works
 
@@ -55,10 +71,12 @@ steps:
 2. **Cache check** — restores a cached binary keyed on `kapi-{version}-{os}-{arch}`.
 3. **Download + verify** (on cache miss) — downloads the archive and `checksums.txt` from the GitHub release, verifies the SHA-256 checksum, and extracts the binary.
 4. **Add to PATH** — makes `kapi` available to all subsequent steps.
+5. **Configure auth** (optional) — exports `BOWRAIN_AUTH_TOKEN`/`BOWRAIN_SERVER_URL` when `auth-token` is set.
+6. **Install plugins** (optional) — installs each ref in `plugins` via `kapi plugins install`, cached keyed on the plugin set + OS + arch.
 
 ## Caching
 
-The action caches the binary keyed on version + OS + arch. Skips download and checksum verification on cache hit.
+The binary is cached keyed on version + OS + arch; plugins are cached keyed on the plugin set + OS + arch. Both skip their download step on a cache hit.
 
 ## Platform support
 

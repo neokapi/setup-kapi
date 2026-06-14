@@ -2,7 +2,8 @@
 # Download kapi CLI archive, verify SHA-256 checksum, and extract.
 #
 # Usage: download-verify.sh <version> <os> <arch> <ext> <dest>
-# Requires: GH_TOKEN environment variable for private repo access.
+# Requires: GH_TOKEN for the `gh` CLI (release download + API rate limits). The
+# built-in GITHUB_TOKEN suffices now that neokapi/neokapi is public.
 
 set -euo pipefail
 

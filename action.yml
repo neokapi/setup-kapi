@@ -10,13 +10,29 @@ inputs:
     required: false
     default: "1.0.0"
   token:
-    description: "GitHub token with read access to neokapi/neokapi releases"
-    required: true
+    description: "GitHub token used for release downloads and API rate limits. The built-in GITHUB_TOKEN is sufficient now that neokapi/neokapi is public."
+    required: false
+    default: ${{ github.token }}
+  plugins:
+    description: "Newline- or comma-separated plugin refs to install (e.g. 'kapi-bowrain')"
+    required: false
+    default: ""
+  auth-token:
+    description: "Bowrain server JWT auth token (exported as BOWRAIN_AUTH_TOKEN)"
+    required: false
+    default: ""
+  server:
+    description: "Bowrain server URL (exported as BOWRAIN_SERVER_URL)"
+    required: false
+    default: ""
 
 outputs:
   version:
     description: "Installed kapi CLI version (e.g. '0.5.0')"
     value: ${{ steps.resolve.outputs.version }}
+  cache-hit:
+    description: "Whether the plugin cache was hit"
+    value: ${{ steps.plugin-cache.outputs.cache-hit }}
 
 runs:
   using: "composite"
@@ -86,3 +102,53 @@ runs:
     - name: Verify installation
       shell: bash
       run: kapi version
+
+    # 7. Configure bowrain server auth (optional)
+    - name: Configure auth
+      if: inputs.auth-token != ''
+      shell: bash
+      env:
+        INPUT_AUTH_TOKEN: ${{ inputs.auth-token }}
+        INPUT_SERVER: ${{ inputs.server }}
+      run: |
+        echo "BOWRAIN_AUTH_TOKEN=${INPUT_AUTH_TOKEN}" >> "$GITHUB_ENV"
+        if [ -n "${INPUT_SERVER}" ]; then
+          echo "BOWRAIN_SERVER_URL=${INPUT_SERVER}" >> "$GITHUB_ENV"
+        fi
+        echo "Auth configured for kapi"
+
+    # 8. Compute plugin hash
+    - name: Compute plugin hash
+      if: inputs.plugins != ''
+      id: plugin-hash
+      shell: bash
+      env:
+        INPUT_PLUGINS: ${{ inputs.plugins }}
+      run: |
+        HASH=$(echo "${INPUT_PLUGINS}" | sha256sum | awk '{print $1}' 2>/dev/null || echo "${INPUT_PLUGINS}" | shasum -a 256 | awk '{print $1}')
+        echo "hash=${HASH}" >> "$GITHUB_OUTPUT"
+
+    # 9. Restore plugin cache
+    - name: Restore plugin cache
+      if: inputs.plugins != ''
+      id: plugin-cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.config/kapi/plugins
+        key: kapi-plugins-${{ steps.plugin-hash.outputs.hash }}-${{ runner.os }}-${{ runner.arch }}
+        restore-keys: |
+          kapi-plugins-
+
+    # 10. Install plugins (on cache miss)
+    - name: Install plugins
+      if: inputs.plugins != '' && steps.plugin-cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        INPUT_PLUGINS: ${{ inputs.plugins }}
+      run: |
+        # Normalize: replace commas with newlines, trim whitespace, skip empty lines
+        PLUGINS=$(echo "${INPUT_PLUGINS}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$')
+        while IFS= read -r plugin; do
+          echo "Installing plugin: ${plugin}"
+          kapi plugins install "${plugin}"
+        done <<< "${PLUGINS}"
