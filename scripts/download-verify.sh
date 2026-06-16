@@ -13,7 +13,7 @@ ARCH="${3:?}"
 EXT="${4:?}"
 DEST="${5:?}"
 
-ARCHIVE="kapi-cli_${VERSION}_${OS}_${ARCH}.${EXT}"
+ARCHIVE="kapi_${VERSION}_${OS}_${ARCH}.${EXT}"
 TAG="v${VERSION}"
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "${TMPDIR}"' EXIT
