@@ -50,10 +50,16 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+        # Use the action's own resolver rather than a second copy of the logic.
+        # This step used to call `releases/latest` directly and hit exactly the
+        # bug the action had: neokapi/neokapi publishes plugin and app releases
+        # alongside CLI ones, so that flag lands on whichever was published last
+        # (a plugin, today), and the pinned test then asked for version
+        # "check-v0.1.0".
         run: |
-          TAG=$(gh api repos/neokapi/neokapi/releases/latest --jq .tag_name)
-          VERSION="${TAG#v}"
+          VERSION=$(./scripts/resolve-version.sh latest)
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Pinning to CLI version ${VERSION}"
 
       - name: Setup kapi (pinned)
         id: setup
