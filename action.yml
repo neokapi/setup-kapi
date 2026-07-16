@@ -14,9 +14,14 @@ inputs:
     required: false
     default: ${{ github.token }}
   plugins:
-    description: "Newline- or comma-separated plugin refs to install (e.g. 'kapi-bowrain')"
+    description: >-
+      Newline- or comma-separated plugin refs to install, as the registry
+      names them (e.g. 'bowrain', 'okapi-bridge'). The 'kapi-' binary prefix
+      is accepted and stripped ('kapi-bowrain' → 'bowrain'). Defaults to
+      'bowrain' so server-connected projects work out of the box; pass '' to
+      install nothing.
     required: false
-    default: ""
+    default: "bowrain"
   auth-token:
     description: "Bowrain server JWT auth token (exported as BOWRAIN_AUTH_TOKEN)"
     required: false
@@ -151,8 +156,11 @@ runs:
       env:
         INPUT_PLUGINS: ${{ inputs.plugins }}
       run: |
-        # Normalize: replace commas with newlines, trim whitespace, skip empty lines
-        PLUGINS=$(echo "${INPUT_PLUGINS}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$')
+        # Normalize: replace commas with newlines, trim whitespace, skip empty
+        # lines, and strip the 'kapi-' binary prefix — the registry names the
+        # plugin 'bowrain' while its binary and archives are 'kapi-bowrain',
+        # so both spellings should install.
+        PLUGINS=$(echo "${INPUT_PLUGINS}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^kapi-//' | grep -v '^$')
         while IFS= read -r plugin; do
           echo "Installing plugin: ${plugin}"
           kapi plugins install "${plugin}"
