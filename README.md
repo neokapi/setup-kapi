@@ -67,6 +67,31 @@ steps:
 | `version` | Installed version (e.g. `1.0.0`) |
 | `cache-hit` | Whether the plugin cache was hit |
 
+### With the Okapi bridge (Java plugin)
+
+The `okapi-bridge` plugin runs Okapi Framework filters as a Java subprocess,
+so the runner needs a JVM — Java 11+, or Java 17+ for Okapi 1.48.0 and later.
+GitHub's hosted Ubuntu runners ship a default JDK; pin one explicitly with
+`setup-java` when you need a specific version:
+
+```yaml
+steps:
+  - uses: actions/setup-java@v4
+    with:
+      distribution: temurin
+      java-version: "17"
+
+  - uses: neokapi/setup-kapi@v1
+    with:
+      plugins: |
+        bowrain
+        okapi-bridge
+```
+
+The plugin (bridge JARs included) is cached like any other, keyed on the
+plugin set + OS + arch, so the download cost is paid once per runner
+image.
+
 ## How it works
 
 1. **Resolve version** — `latest` resolves the newest *stable CLI* release (a `vX.Y.Z` tag). It deliberately does not use GitHub's "latest release" flag: the same repository publishes plugin and app releases (`check-v0.1.0`, `asr-v0.1.1`, `bowrain-v…`), and that flag lands on whichever was published last. Pinned versions pass through.
