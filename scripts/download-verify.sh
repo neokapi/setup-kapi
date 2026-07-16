@@ -13,21 +13,43 @@ ARCH="${3:?}"
 EXT="${4:?}"
 DEST="${5:?}"
 
-ARCHIVE="kapi_${VERSION}_${OS}_${ARCH}.${EXT}"
 TAG="v${VERSION}"
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "${TMPDIR}"' EXIT
+
+# The CLI archive was renamed for 1.2.0: kapi_<ver>_<os>_<arch>.<ext> became
+# kapi-cli_<ver>_<os>_<arch>.<ext> (scripts/package-cli.sh mirrors the
+# Homebrew naming, where the CLI toolchain is kapi-cli). Resolve the actual
+# name from checksums.txt — the release's own asset manifest — so the action
+# installs both eras: 1.1.0 and earlier ship kapi_, 1.2.0-rc1 and later ship
+# kapi-cli_.
+echo "Fetching checksums.txt from release ${TAG}..."
+gh release download "${TAG}" \
+  --repo neokapi/neokapi \
+  --pattern "checksums.txt" \
+  --dir "${TMPDIR}"
+
+cd "${TMPDIR}"
+ARCHIVE=""
+for candidate in "kapi-cli_${VERSION}_${OS}_${ARCH}.${EXT}" "kapi_${VERSION}_${OS}_${ARCH}.${EXT}"; do
+  if awk -v name="${candidate}" '$2 == name { found = 1 } END { exit !found }' checksums.txt; then
+    ARCHIVE="${candidate}"
+    break
+  fi
+done
+if [ -z "${ARCHIVE}" ]; then
+  echo "::error::Release ${TAG} has neither kapi-cli_${VERSION}_${OS}_${ARCH}.${EXT} nor kapi_${VERSION}_${OS}_${ARCH}.${EXT} in checksums.txt" >&2
+  exit 1
+fi
 
 echo "Downloading ${ARCHIVE} from release ${TAG}..."
 gh release download "${TAG}" \
   --repo neokapi/neokapi \
   --pattern "${ARCHIVE}" \
-  --pattern "checksums.txt" \
   --dir "${TMPDIR}"
 
 # Verify checksum
-cd "${TMPDIR}"
-EXPECTED=$(grep "${ARCHIVE}" checksums.txt | awk '{print $1}')
+EXPECTED=$(awk -v name="${ARCHIVE}" '$2 == name { print $1 }' checksums.txt)
 if [ -z "${EXPECTED}" ]; then
   echo "::error::Archive ${ARCHIVE} not found in checksums.txt" >&2
   exit 1
