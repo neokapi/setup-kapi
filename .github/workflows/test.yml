@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Daily canary: the action installs from neokapi/neokapi releases, so it can
+  # break without a commit here (a renamed release asset did exactly that for
+  # 1.2.0). The schedule catches that class of breakage; the prerelease job
+  # below catches it while it is still an RC.
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
 
 jobs:
   test-latest:
@@ -76,6 +83,52 @@ jobs:
         run: |
           echo "Expected: ${EXPECTED}, Actual: ${ACTUAL}"
           test "${EXPECTED}" = "${ACTUAL}"
+
+  # Canary against the newest CLI prerelease. Release packaging changes land
+  # on RCs first (the kapi_ → kapi-cli_ archive rename shipped on 1.2.0-rc1),
+  # so installing the newest prerelease here fails weeks before the same
+  # breakage would reach a stable release and every consumer workflow.
+  test-prerelease:
+    name: "Prerelease canary"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve newest CLI prerelease
+        id: prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+        # Same tag discipline as resolve-version.sh: only vX.Y.Z-… CLI tags,
+        # never plugin/app tags (check-v…, asr-v…, bowrain-v…).
+        run: |
+          VERSION=$(
+            gh api "repos/neokapi/neokapi/releases?per_page=100" --paginate \
+              --jq '.[] | select(.draft == false and .prerelease == true) | .tag_name' |
+              grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-' |
+              sed 's/^v//' |
+              sort -V |
+              tail -n 1
+          ) || true
+          if [ -z "${VERSION}" ]; then
+            echo "No CLI prerelease found — nothing to canary."
+          else
+            echo "Newest CLI prerelease: ${VERSION}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup kapi (prerelease)
+        if: steps.prerelease.outputs.version != ''
+        id: setup
+        uses: ./
+        with:
+          token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+          version: ${{ steps.prerelease.outputs.version }}
+
+      - name: Verify kapi is on PATH
+        if: steps.prerelease.outputs.version != ''
+        shell: bash
+        run: kapi version
 
   test-cache:
     name: "Cache hit (${{ matrix.os }})"

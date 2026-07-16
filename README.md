@@ -2,7 +2,7 @@
 
 GitHub Action for installing the [kapi CLI](https://github.com/neokapi/neokapi) in CI workflows.
 
-Downloads the correct binary for the runner platform, verifies SHA-256 checksums, caches between runs, and optionally installs kapi plugins (such as the bowrain plugin, `kapi-bowrain`) and configures server authentication.
+Downloads the correct binary for the runner platform, verifies SHA-256 checksums, caches between runs, installs kapi plugins (the bowrain plugin by default), and configures server authentication.
 
 ## Usage
 
@@ -33,13 +33,15 @@ steps:
   - run: kapi run
 ```
 
-### With the bowrain plugin and server auth
+### With server auth
+
+The bowrain plugin is installed by default, so a server-connected project only
+needs credentials:
 
 ```yaml
 steps:
   - uses: neokapi/setup-kapi@v1
     with:
-      plugins: kapi-bowrain
       auth-token: ${{ secrets.BOWRAIN_AUTH_TOKEN }}
       server: https://your.bowrain.server
 
@@ -54,7 +56,7 @@ steps:
 |-------|-------------|---------|----------|
 | `version` | Kapi CLI version (e.g. `1.1.0`), or `latest` for the newest stable CLI release | `latest` | No |
 | `token` | GitHub token for release downloads and API rate limits | `${{ github.token }}` | No |
-| `plugins` | Newline- or comma-separated plugin refs to install (e.g. `kapi-bowrain`) | — | No |
+| `plugins` | Newline- or comma-separated plugin refs to install, as the registry names them (`bowrain`, `okapi-bridge`; a `kapi-` prefix is stripped). Pass `''` to install nothing | `bowrain` | No |
 | `auth-token` | Bowrain server JWT, exported as `BOWRAIN_AUTH_TOKEN` | — | No |
 | `server` | Bowrain server URL, exported as `BOWRAIN_SERVER_URL` | — | No |
 
@@ -72,7 +74,7 @@ steps:
 3. **Download + verify** (on cache miss) — downloads the archive and `checksums.txt` from the GitHub release, verifies the SHA-256 checksum, and extracts the binary.
 4. **Add to PATH** — makes `kapi` available to all subsequent steps.
 5. **Configure auth** (optional) — exports `BOWRAIN_AUTH_TOKEN`/`BOWRAIN_SERVER_URL` when `auth-token` is set.
-6. **Install plugins** (optional) — installs each ref in `plugins` via `kapi plugins install`, cached keyed on the plugin set + OS + arch.
+6. **Install plugins** — installs each ref in `plugins` (default: `bowrain`) via `kapi plugins install`, cached keyed on the plugin set + OS + arch. Refs use the registry names; a `kapi-` binary prefix is stripped (`kapi-bowrain` → `bowrain`).
 
 ## Caching
 
