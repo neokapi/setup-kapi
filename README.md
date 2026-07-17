@@ -48,7 +48,7 @@ steps:
   - run: kapi up
 ```
 
-`kapi up` is the convergence verb: with the bowrain plugin installed and a `server:` block in the recipe, it pushes, converges on the server, and pulls the produced targets back. To run it and commit the results, pair this with [`kapi-action`](https://github.com/neokapi/kapi-action).
+`kapi up` runs the kapi loop: with the bowrain plugin installed and a `server:` block in the recipe, it pushes, catches up on the server, and pulls the produced targets back. To run it and commit the results, pair this with [`kapi-action`](https://github.com/neokapi/kapi-action).
 
 ## Inputs
 
