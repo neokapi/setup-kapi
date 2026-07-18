@@ -30,6 +30,20 @@ inputs:
     description: "Bowrain server URL (exported as BOWRAIN_SERVER_URL)"
     required: false
     default: ""
+  cache-tm:
+    description: >-
+      Restore and persist the project translation memory across CI runs via the
+      job cache. The TM is derived state kept out of git (AD-009): the latest
+      branch TM is restored at setup, and the grown TM is saved back at job end
+      under a run-unique key, so leverage compounds without committing anything.
+      A cold cache is fine — kapi rebuilds the TM from the committed translations.
+      Runs only when a *.kapi recipe is present. Set 'false' to disable.
+    required: false
+    default: "true"
+  project-dir:
+    description: "Directory holding the .kapi project (recipe + state) for the TM cache. Default: repository root."
+    required: false
+    default: "."
 
 outputs:
   version:
@@ -165,3 +179,39 @@ runs:
           echo "Installing plugin: ${plugin}"
           kapi plugins install "${plugin}"
         done <<< "${PLUGINS}"
+
+    # 11. Detect a kapi project — a committed *.kapi recipe. The TM cache only
+    #     runs where there is a project TM to persist (the .kapi/ state dir is
+    #     gitignored, so it may not exist yet; the recipe is the committed signal).
+    - name: Detect kapi project
+      id: detect-project
+      if: inputs.cache-tm != 'false'
+      shell: bash
+      env:
+        PROJECT_DIR: ${{ inputs.project-dir }}
+      run: |
+        if ls "${PROJECT_DIR}"/*.kapi >/dev/null 2>&1; then
+          echo "found=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "found=false (no *.kapi recipe in ${PROJECT_DIR}); skipping TM cache" >&2
+          echo "found=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    # 12. Restore/persist the project TM across runs via the job cache. The TM is
+    #     derived state kept out of git (AD-009): restore the latest branch TM at
+    #     setup, and — because the key is run-unique — actions/cache saves the
+    #     grown TM at job end via its own post step. No git writes, no locking
+    #     (additive + rebuildable, last-write-wins); a cold cache rebuilds from
+    #     committed content. Covers the current .kapi/tm.db and the .kapi/cache/
+    #     derived stores.
+    - name: Restore project TM cache
+      if: inputs.cache-tm != 'false' && steps.detect-project.outputs.found == 'true'
+      uses: actions/cache@v5
+      with:
+        path: |
+          ${{ inputs.project-dir }}/.kapi/tm.db
+          ${{ inputs.project-dir }}/.kapi/cache
+        key: kapi-tm-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+        restore-keys: |
+          kapi-tm-${{ runner.os }}-${{ github.ref_name }}-
+          kapi-tm-${{ runner.os }}-
