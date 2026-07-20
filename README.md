@@ -59,8 +59,8 @@ steps:
 | `plugins` | Newline- or comma-separated plugin refs to install, as the registry names them (`bowrain`, `okapi-bridge`; a `kapi-` prefix is stripped). Pass `''` to install nothing | `bowrain` | No |
 | `auth-token` | Bowrain server JWT, exported as `BOWRAIN_AUTH_TOKEN` | — | No |
 | `server` | Bowrain server URL, exported as `BOWRAIN_SERVER_URL` | — | No |
-| `cache-tm` | Restore/persist the project translation memory across runs via the job cache (out of git). Runs only when a `*.kapi` recipe is present. Set `false` to disable | `true` | No |
-| `project-dir` | Directory holding the `.kapi` project for the TM cache | `.` | No |
+| `cache-tm` | Restore/persist the project translation memory across runs via the job cache (out of git). Runs only when a `kapi.yaml` recipe (or legacy `*.kapi`) is present. Set `false` to disable | `true` | No |
+| `project-dir` | Directory holding the `kapi.yaml` project for the TM cache | `.` | No |
 
 ## Outputs
 
@@ -102,7 +102,7 @@ image.
 4. **Add to PATH** — makes `kapi` available to all subsequent steps.
 5. **Configure auth** (optional) — exports `BOWRAIN_AUTH_TOKEN`/`BOWRAIN_SERVER_URL` when `auth-token` is set.
 6. **Install plugins** — installs each ref in `plugins` (default: `bowrain`) via `kapi plugins install`, cached keyed on the plugin set + OS + arch. Refs use the registry names; a `kapi-` binary prefix is stripped (`kapi-bowrain` → `bowrain`).
-7. **Restore project TM cache** (when a `*.kapi` recipe is present) — restores the latest translation memory for the branch from the job cache and, via a run-unique key, saves the grown TM back at job end. The TM is **derived state kept out of git**: it accumulates leverage across runs without being committed, and a cold cache simply rebuilds from the committed translations. No commits, no locking (per-branch, last-write-wins). Disable with `cache-tm: false`.
+7. **Restore project TM cache** (when a `kapi.yaml` recipe (or legacy `*.kapi`) is present) — restores the latest translation memory for the branch from the job cache and, via a run-unique key, saves the grown TM back at job end. The TM is **derived state kept out of git**: it accumulates leverage across runs without being committed, and a cold cache simply rebuilds from the committed translations. No commits, no locking (per-branch, last-write-wins). Disable with `cache-tm: false`.
 
 ## Caching
 

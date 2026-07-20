@@ -37,11 +37,11 @@ inputs:
       branch TM is restored at setup, and the grown TM is saved back at job end
       under a run-unique key, so leverage compounds without committing anything.
       A cold cache is fine — kapi rebuilds the TM from the committed translations.
-      Runs only when a *.kapi recipe is present. Set 'false' to disable.
+      Runs only when a kapi.yaml recipe (or legacy *.kapi) is present. Set 'false' to disable.
     required: false
     default: "true"
   project-dir:
-    description: "Directory holding the .kapi project (recipe + state) for the TM cache. Default: repository root."
+    description: "Directory holding the kapi.yaml project (recipe + state) for the TM cache. Default: repository root."
     required: false
     default: "."
 
@@ -180,7 +180,7 @@ runs:
           kapi plugins install "${plugin}"
         done <<< "${PLUGINS}"
 
-    # 11. Detect a kapi project — a committed *.kapi recipe. The TM cache only
+    # 11. Detect a kapi project — a committed kapi.yaml recipe (or legacy *.kapi). The TM cache only
     #     runs where there is a project TM to persist (the .kapi/ state dir is
     #     gitignored, so it may not exist yet; the recipe is the committed signal).
     - name: Detect kapi project
@@ -190,10 +190,10 @@ runs:
       env:
         PROJECT_DIR: ${{ inputs.project-dir }}
       run: |
-        if ls "${PROJECT_DIR}"/*.kapi >/dev/null 2>&1; then
+        if ls "${PROJECT_DIR}"/kapi.yaml >/dev/null 2>&1 || ls "${PROJECT_DIR}"/*.kapi >/dev/null 2>&1; then
           echo "found=true" >> "$GITHUB_OUTPUT"
         else
-          echo "found=false (no *.kapi recipe in ${PROJECT_DIR}); skipping TM cache" >&2
+          echo "found=false (no kapi.yaml recipe (or legacy *.kapi) in ${PROJECT_DIR}); skipping TM cache" >&2
           echo "found=false" >> "$GITHUB_OUTPUT"
         fi
 
