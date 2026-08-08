@@ -176,8 +176,14 @@ runs:
         # so both spellings should install.
         PLUGINS=$(echo "${INPUT_PLUGINS}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^kapi-//' | grep -v '^$')
         while IFS= read -r plugin; do
-          echo "Installing plugin: ${plugin}"
-          kapi plugins install "${plugin}"
+          # A prerelease constraint (name@X.Y.Z-rcN) lives on the beta
+          # channel; resolving it against stable can only fail.
+          args=()
+          case "${plugin}" in
+            *@*-*) args+=(--channel beta) ;;
+          esac
+          echo "Installing plugin: ${plugin}${args:+ (${args[*]})}"
+          kapi plugins install ${args[@]+"${args[@]}"} "${plugin}"
         done <<< "${PLUGINS}"
 
     # 11. Detect a kapi project — a committed kapi.yaml recipe (or legacy *.kapi). The TM cache only
