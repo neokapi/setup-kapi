@@ -1,0 +1,20 @@
+# A small kapi 1.2 project for the state cache test. The pseudo flow needs no
+# provider credentials, so kapi up runs the same on every runner.
+version: v1
+name: cache-fixture
+defaults:
+  source_language: en
+  target_languages:
+    - fr
+  flow: pseudo
+collections:
+  - path: "locales/en.json"
+    format: json
+    target: "locales/{lang}.json"
+  - path: "docs/en/*.md"
+    format: markdown
+    target: "docs/{lang}/*.md"
+flows:
+  pseudo:
+    steps:
+      - tool: pseudo-translate

@@ -13,6 +13,11 @@ on:
     - cron: "17 5 * * *"
   workflow_dispatch:
 
+env:
+  # The state cache jobs need kapi 1.2, the first release that keeps its state
+  # under .kapi/work/.
+  STATE_CACHE_KAPI_VERSION: 1.2.0-rc32
+
 jobs:
   test-latest:
     name: "Latest (${{ matrix.os }})"
@@ -129,6 +134,131 @@ jobs:
         if: steps.prerelease.outputs.version != ''
         shell: bash
         run: kapi version
+
+  # The state cache round trip on a kapi 1.2 project. This job runs the fixture
+  # and the action saves the cache at job end; the next job restores it. Each
+  # job compares its run in the cached project directory with a cold run of a
+  # pristine copy, and the comparison covers every command's exit code and
+  # output and every file the project holds afterwards.
+  test-state-cache-save:
+    name: "State cache save (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # kapi 1.2 prereleases publish no Windows CLI build.
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup kapi
+        uses: ./
+        with:
+          token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+          version: ${{ env.STATE_CACHE_KAPI_VERSION }}
+          plugins: ""
+          project-dir: test/fixture
+
+      - name: Run the fixture and a cold copy
+        shell: bash
+        run: |
+          test/state-cache/cold-copy.sh "${RUNNER_TEMP}/cold"
+          test/state-cache/run.sh test/fixture "${RUNNER_TEMP}/results/cached"
+          test/state-cache/run.sh "${RUNNER_TEMP}/cold/test/fixture" "${RUNNER_TEMP}/results/cold"
+          test/state-cache/compare.sh "${RUNNER_TEMP}/results/cold" "${RUNNER_TEMP}/results/cached"
+
+      # The restore job needs something to restore; this fails first if kapi
+      # stops writing the path the action caches.
+      - name: Require the parse cache kapi writes
+        shell: bash
+        run: |
+          test -s test/fixture/.kapi/work/cache/docs/index.db
+          cp test/fixture/.kapi/work/store.db "${RUNNER_TEMP}/results/store.db"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: state-cache-save-${{ matrix.os }}
+          path: ${{ runner.temp }}/results
+
+  test-state-cache-restore:
+    name: "State cache restore (${{ matrix.os }})"
+    needs: test-state-cache-save
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup kapi
+        uses: ./
+        with:
+          token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+          version: ${{ env.STATE_CACHE_KAPI_VERSION }}
+          plugins: ""
+          project-dir: test/fixture
+
+      - name: Require the restored parse cache
+        shell: bash
+        run: |
+          docs=test/fixture/.kapi/work/cache/docs
+          test -s "${docs}/index.db"
+          ls "${docs}"/parts-*.log > /dev/null
+          echo "Restored $(find "${docs}" -type f | wc -l | tr -d ' ') files into ${docs}"
+          cp -R "${docs}" "${RUNNER_TEMP}/restored-docs"
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: state-cache-save-${{ matrix.os }}
+          path: ${{ runner.temp }}/saved
+
+      - name: A warm run matches a cold run
+        shell: bash
+        run: |
+          test/state-cache/cold-copy.sh "${RUNNER_TEMP}/cold"
+          test/state-cache/run.sh test/fixture "${RUNNER_TEMP}/results/warm"
+          test/state-cache/run.sh "${RUNNER_TEMP}/cold/test/fixture" "${RUNNER_TEMP}/results/cold"
+          test -s "${RUNNER_TEMP}/results/warm/docs-before.txt"
+          test/state-cache/compare.sh "${RUNNER_TEMP}/results/cold" "${RUNNER_TEMP}/results/warm"
+          test/state-cache/compare.sh "${RUNNER_TEMP}/saved/cold" "${RUNNER_TEMP}/results/warm"
+
+      - name: A cache saved before a source change does not hide it
+        shell: bash
+        run: |
+          git clean -fdxq test/fixture
+          git checkout -- test/fixture
+          mkdir -p test/fixture/.kapi/work/cache
+          cp -R "${RUNNER_TEMP}/restored-docs" test/fixture/.kapi/work/cache/docs
+          test/state-cache/change-source.sh test/fixture
+          test/state-cache/cold-copy.sh "${RUNNER_TEMP}/cold-changed"
+          test/state-cache/change-source.sh "${RUNNER_TEMP}/cold-changed/test/fixture"
+          test/state-cache/run.sh test/fixture "${RUNNER_TEMP}/results/warm-changed"
+          test/state-cache/run.sh "${RUNNER_TEMP}/cold-changed/test/fixture" "${RUNNER_TEMP}/results/cold-changed"
+          test/state-cache/compare.sh "${RUNNER_TEMP}/results/cold-changed" "${RUNNER_TEMP}/results/warm-changed"
+
+      # The negative control: .kapi/work/store.db holds stored targets and the
+      # unit working set, so restoring it has to change a result. If the
+      # comparison reports no difference here, it cannot be trusted above.
+      - name: The comparison catches a restored store
+        shell: bash
+        run: |
+          git clean -fdxq test/fixture
+          git checkout -- test/fixture
+          mkdir -p test/fixture/.kapi/work/cache
+          cp -R "${RUNNER_TEMP}/restored-docs" test/fixture/.kapi/work/cache/docs
+          cp "${RUNNER_TEMP}/saved/store.db" test/fixture/.kapi/work/store.db
+          test/state-cache/run.sh test/fixture "${RUNNER_TEMP}/results/warm-store"
+          if test/state-cache/compare.sh "${RUNNER_TEMP}/results/cold" "${RUNNER_TEMP}/results/warm-store"; then
+            echo "::error::Restoring .kapi/work/store.db changed no result, so the comparison cannot detect restored state."
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: state-cache-restore-${{ matrix.os }}
+          path: ${{ runner.temp }}/results
 
   test-cache:
     name: "Cache hit (${{ matrix.os }})"
