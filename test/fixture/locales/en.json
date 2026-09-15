@@ -1,0 +1,6 @@
+{
+  "greeting": "Hello, {name}!",
+  "farewell": "Goodbye  and good luck.",
+  "cta": "Start your free trial today",
+  "items": "You have {count} items in your cart"
+}
