@@ -32,16 +32,20 @@ inputs:
     default: ""
   cache-tm:
     description: >-
-      Restore and persist the project translation memory across CI runs via the
-      job cache. The TM is derived state kept out of git (AD-009): the latest
-      branch TM is restored at setup, and the grown TM is saved back at job end
-      under a run-unique key, so leverage compounds without committing anything.
-      A cold cache is fine — kapi rebuilds the TM from the committed translations.
-      Runs only when a kapi.yaml recipe (or legacy *.kapi) is present. Set 'false' to disable.
+      Carry kapi's parse cache (.kapi/work/cache/docs) between CI runs with the
+      job cache. kapi keeps the state it derives out of git, under .kapi/work/.
+      The content memory, terms and unit-state record are committed under
+      .kapi/, and kapi builds its local store from them in a fresh checkout, so
+      they need no cache. Only the parse cache is restored: each entry is keyed
+      by the file's content, the parse configuration, the recipe and the kapi
+      build, and kapi parses a file again when any of them differs. The store
+      and the rest of .kapi/work/ are never restored, because restoring them
+      changes what kapi status, kapi check and kapi up report. Runs only when a
+      kapi.yaml recipe (or legacy *.kapi) is present. Set 'false' to disable.
     required: false
     default: "true"
   project-dir:
-    description: "Directory holding the kapi.yaml project (recipe + state) for the TM cache. Default: repository root."
+    description: "Directory holding the kapi.yaml project whose parse cache is carried between runs. Default: repository root."
     required: false
     default: "."
 
@@ -186,9 +190,9 @@ runs:
           kapi plugins install ${args[@]+"${args[@]}"} "${plugin}"
         done <<< "${PLUGINS}"
 
-    # 11. Detect a kapi project — a committed kapi.yaml recipe (or legacy *.kapi). The TM cache only
-    #     runs where there is a project TM to persist (the .kapi/ state dir is
-    #     gitignored, so it may not exist yet; the recipe is the committed signal).
+    # 11. Detect a kapi project: a committed kapi.yaml recipe (or legacy *.kapi).
+    #     The parse cache is carried only for a project. The recipe is the
+    #     signal because .kapi/work/ is gitignored and absent from a checkout.
     - name: Detect kapi project
       id: detect-project
       if: inputs.cache-tm != 'false'
@@ -199,25 +203,37 @@ runs:
         if ls "${PROJECT_DIR}"/kapi.yaml >/dev/null 2>&1 || ls "${PROJECT_DIR}"/*.kapi >/dev/null 2>&1; then
           echo "found=true" >> "$GITHUB_OUTPUT"
         else
-          echo "found=false (no kapi.yaml recipe (or legacy *.kapi) in ${PROJECT_DIR}); skipping TM cache" >&2
+          echo "found=false (no kapi.yaml recipe (or legacy *.kapi) in ${PROJECT_DIR}); skipping the parse cache" >&2
           echo "found=false" >> "$GITHUB_OUTPUT"
         fi
 
-    # 12. Restore/persist the project TM across runs via the job cache. The TM is
-    #     derived state kept out of git (AD-009): restore the latest branch TM at
-    #     setup, and — because the key is run-unique — actions/cache saves the
-    #     grown TM at job end via its own post step. No git writes, no locking
-    #     (additive + rebuildable, last-write-wins); a cold cache rebuilds from
-    #     committed content. Covers the current .kapi/tm.db and the .kapi/cache/
-    #     derived stores.
-    - name: Restore project TM cache
+    # 12. Restore kapi's parse cache, and save it at job end. The key is unique
+    #     to the job and run attempt, so actions/cache saves through its own
+    #     post step; the restore takes the newest cache for the same kapi
+    #     version, preferring the same ref.
+    #
+    #     Only .kapi/work/cache/docs is carried. kapi keys each entry by the
+    #     file's absolute path and content hash, the parse configuration, the
+    #     recipe and the kapi build, and parses again on any mismatch, so a
+    #     restored entry is either valid for the checkout or ignored. The rest
+    #     of .kapi/work/ stays out of the cache:
+    #       - store.db holds stored targets and the unit working set; restored,
+    #         it changes what kapi status, kapi check --ship and kapi up report.
+    #       - cache/extractions holds kapi extract batches that kapi merge reads.
+    #       - cache/redaction and vault/ hold withheld original values.
+    #       - cache/sync-cache.json and cache/refs.json hold server sync state,
+    #         including a claim token.
+    #     The content memory, terms and unit-state record are committed under
+    #     .kapi/ and come with the checkout.
+    #
+    #     The kapi version is part of the key because the parse cache keeps the
+    #     entries every build wrote; a new version starts from an empty cache.
+    - name: Restore kapi parse cache
       if: inputs.cache-tm != 'false' && steps.detect-project.outputs.found == 'true'
       uses: actions/cache@v5
       with:
-        path: |
-          ${{ inputs.project-dir }}/.kapi/tm.db
-          ${{ inputs.project-dir }}/.kapi/cache
-        key: kapi-tm-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+        path: ${{ inputs.project-dir }}/.kapi/work/cache/docs
+        key: kapi-parse-${{ runner.os }}-${{ steps.resolve.outputs.version }}-${{ github.ref_name }}-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
         restore-keys: |
-          kapi-tm-${{ runner.os }}-${{ github.ref_name }}-
-          kapi-tm-${{ runner.os }}-
+          kapi-parse-${{ runner.os }}-${{ steps.resolve.outputs.version }}-${{ github.ref_name }}-
+          kapi-parse-${{ runner.os }}-${{ steps.resolve.outputs.version }}-
