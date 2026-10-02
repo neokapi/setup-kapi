@@ -260,6 +260,55 @@ jobs:
           name: state-cache-restore-${{ matrix.os }}
           path: ${{ runner.temp }}/results
 
+  # parse-cache and its deprecated name cache-tm. The save job left a parse
+  # cache to restore, and no kapi command runs here, so whether the cache
+  # directory exists after setup shows which value the action acted on. When
+  # cache-tm is set, it decides.
+  test-parse-cache-input:
+    name: "Parse cache input (${{ matrix.case }})"
+    needs: test-state-cache-save
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - case: "parse-cache: false"
+            parse_cache: "false"
+            cache_tm: ""
+            restored: "false"
+          - case: "cache-tm: false"
+            parse_cache: "true"
+            cache_tm: "false"
+            restored: "false"
+          - case: "cache-tm: true over parse-cache: false"
+            parse_cache: "false"
+            cache_tm: "true"
+            restored: "true"
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup kapi
+        uses: ./
+        with:
+          token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+          version: ${{ env.STATE_CACHE_KAPI_VERSION }}
+          plugins: ""
+          project-dir: test/fixture
+          parse-cache: ${{ matrix.parse_cache }}
+          cache-tm: ${{ matrix.cache_tm }}
+
+      - name: Check whether the parse cache was restored
+        shell: bash
+        env:
+          WANT_RESTORED: ${{ matrix.restored }}
+        run: |
+          docs=test/fixture/.kapi/work/cache/docs
+          if [ "${WANT_RESTORED}" = "true" ]; then
+            test -s "${docs}/index.db"
+          else
+            test ! -e "${docs}"
+          fi
+
   test-cache:
     name: "Cache hit (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}

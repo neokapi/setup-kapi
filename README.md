@@ -62,7 +62,8 @@ The newest stable release, which `latest` installs, has no `kapi up`, so this ex
 | `plugins` | Newline- or comma-separated plugin refs to install, as the registry names them (`bowrain`, `okapi-bridge`; a `kapi-` prefix is stripped). Pass `''` to install nothing | `bowrain` | No |
 | `auth-token` | Bowrain server JWT, exported as `BOWRAIN_AUTH_TOKEN` | — | No |
 | `server` | Bowrain server URL, exported as `BOWRAIN_SERVER_URL` | — | No |
-| `cache-tm` | Carry kapi's parse cache (`.kapi/work/cache/docs`) between runs with the job cache; see [Project parse cache](#project-parse-cache). Runs only when a `kapi.yaml` recipe (or legacy `*.kapi`) is present. Set `false` to disable | `true` | No |
+| `parse-cache` | Carry kapi's parse cache (`.kapi/work/cache/docs`) between runs with the job cache; see [Project parse cache](#project-parse-cache). Runs only when a `kapi.yaml` recipe (or legacy `*.kapi`) is present. Set `false` to disable | `true` | No |
+| `cache-tm` | Deprecated name of `parse-cache`. When set, it decides in place of `parse-cache`, and the action prints a warning | `''` | No |
 | `project-dir` | Directory holding the `kapi.yaml` project whose parse cache is carried between runs | `.` | No |
 
 ## Outputs
@@ -105,7 +106,7 @@ image.
 4. **Add to PATH** — makes `kapi` available to all subsequent steps.
 5. **Configure auth** (optional) — exports `BOWRAIN_AUTH_TOKEN`/`BOWRAIN_SERVER_URL` when `auth-token` is set.
 6. **Install plugins** — installs each ref in `plugins` (default: `bowrain`) via `kapi plugins install`, cached keyed on the plugin set + OS + arch. Refs use the registry names; a `kapi-` binary prefix is stripped (`kapi-bowrain` → `bowrain`).
-7. **Restore the project parse cache** (when a `kapi.yaml` recipe, or legacy `*.kapi`, is present): restores `.kapi/work/cache/docs` from the job cache, and saves it again at job end under a key unique to the job and run attempt. See [Project parse cache](#project-parse-cache). Disable with `cache-tm: false`.
+7. **Restore the project parse cache** (when a `kapi.yaml` recipe, or legacy `*.kapi`, is present): restores `.kapi/work/cache/docs` from the job cache, and saves it again at job end under a key unique to the job and run attempt. See [Project parse cache](#project-parse-cache) for what it leaves to `kapi context pull`. Disable with `parse-cache: false`.
 
 ## Caching
 
@@ -113,14 +114,15 @@ The binary is cached keyed on version + OS + arch; plugins are cached keyed on t
 
 ### Project parse cache
 
-kapi keeps the state it derives out of git, under `.kapi/work/` (the project's `.kapi/.gitignore` ignores `work/` and `filters.local.json`). With `cache-tm` on and a recipe in `project-dir`, the action restores one directory of it, `.kapi/work/cache/docs`, before your steps run, and `actions/cache` saves it again when the job ends. kapi records there how it parsed each source and target file, so a later run can replay a file instead of parsing it again.
+kapi keeps what it derives from a checkout under `.kapi/`, out of git. With `parse-cache` on and a recipe in `project-dir`, the action restores one directory of it, `.kapi/work/cache/docs`, before your steps run, and `actions/cache` saves it again when the job ends. kapi records there how it parsed each source and target file, so a later run can replay a file instead of parsing it again.
 
 A restored parse cache does not change any result. kapi keys each entry by the file's path and content hash, the parse configuration, the recipe and the kapi build, and parses the file again when any of them differs. The test workflow checks this on every change: with the cache restored, `kapi status`, `kapi check`, `kapi check --ship` and `kapi up` must match a cold run exactly, in exit codes, output and every file written, and they must still match after the source changes.
 
-Everything else under `.kapi/` stays out of the cache:
+The project's context (its terms, voice profiles, content memory and recorded decisions) lives in kapi's workspace, outside git, and moves between machines through a context backend (kapi 1.3 and later). A runner starts with an empty workspace, so a job that needs the context runs `kapi context pull` before kapi works, and `kapi context push` after a run records something. setup-kapi runs neither command: [`kapi-action`](https://github.com/neokapi/kapi-action)'s `context-sync` input runs them around its command, or your workflow can run them as steps of its own.
 
-- The content memory, terms, voice profile and unit-state record are committed under `.kapi/`, so the checkout already holds them, and kapi builds its local store from them.
-- `.kapi/work/store.db` also holds stored targets and staged review decisions. Restored from an earlier run, it reports targets the checkout does not hold, and `kapi status`, `kapi check --ship` and `kapi up` report differently than they would on a cold run.
+Everything else under `.kapi/work/` stays out of the cache:
+
+- `.kapi/work/store.db` holds this checkout's block cache and the targets a run wrote. Restored from an earlier run, it reports targets the checkout does not hold, and `kapi status`, `kapi check --ship` and `kapi up` report differently than they would on a cold run.
 - `.kapi/work/cache/extractions/` holds `kapi extract` batches for `kapi merge`, and `.kapi/work/cache/redaction/` and `.kapi/work/vault/` hold withheld original values.
 - `.kapi/work/cache/sync-cache.json` and `.kapi/work/cache/refs.json` hold server sync state, including a claim token.
 
