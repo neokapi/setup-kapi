@@ -140,15 +140,21 @@ runs:
         fi
         echo "Auth configured for kapi"
 
-    # 8. Compute plugin hash
-    - name: Compute plugin hash
+    # 8. Compute the plugin cache key. kapi picks each plugin's version from
+    #    the requested ref, its own version (a registry entry can require a
+    #    newer kapi) and the plugin's registry entry. The key covers all
+    #    three, so a cache restores only the plugins a fresh install by this
+    #    kapi would choose; a new kapi or a new plugin release misses it.
+    - name: Compute plugin cache key
       if: inputs.plugins != ''
       id: plugin-hash
       shell: bash
       env:
         INPUT_PLUGINS: ${{ inputs.plugins }}
+        KAPI_VERSION: ${{ steps.resolve.outputs.version }}
+        ACTION_PATH: ${{ github.action_path }}
       run: |
-        HASH=$(echo "${INPUT_PLUGINS}" | sha256sum | awk '{print $1}' 2>/dev/null || echo "${INPUT_PLUGINS}" | shasum -a 256 | awk '{print $1}')
+        HASH=$("${ACTION_PATH}/scripts/plugin-cache-key.sh" "${KAPI_VERSION}" "${INPUT_PLUGINS}")
         echo "hash=${HASH}" >> "$GITHUB_OUTPUT"
 
     # 9. Restore plugin cache
@@ -163,9 +169,10 @@ runs:
         # ever written there, so the cache saved an empty path and every run
         # re-downloaded every plugin.
         path: ~/.local/share/kapi/plugins
-        key: kapi-plugins-${{ steps.plugin-hash.outputs.hash }}-${{ runner.os }}-${{ runner.arch }}
-        restore-keys: |
-          kapi-plugins-
+        #
+        # No restore-keys: a partial match would restore plugins chosen for
+        # another kapi or an older registry entry.
+        key: kapi-plugins-v2-${{ steps.plugin-hash.outputs.hash }}-${{ runner.os }}-${{ runner.arch }}
 
     # 10. Install plugins (on cache miss)
     - name: Install plugins

@@ -17,6 +17,10 @@ env:
   # The state cache jobs need kapi 1.2, the first release that keeps its state
   # under .kapi/work/.
   STATE_CACHE_KAPI_VERSION: 1.2.0-rc32
+  # The plugin cache jobs seed a cache with this kapi and an older bowrain,
+  # then set up the newest kapi over it.
+  PLUGIN_SEED_KAPI_VERSION: 1.2.0
+  PLUGIN_SEED_BOWRAIN_VERSION: 1.0.2
 
 jobs:
   test-latest:
@@ -285,3 +289,98 @@ jobs:
       - name: Verify kapi works from cache
         shell: bash
         run: kapi version
+
+      # A cache hit installs no plugin, so check the cached one is current.
+      - name: Verify the cached plugin is current
+        shell: bash
+        run: test/plugins/matches-fresh.sh bowrain
+
+  # The plugin cache across a kapi upgrade. The seed job sets up an older kapi
+  # and leaves an older bowrain in the plugin root, as a cache saved before a
+  # newer bowrain was published would hold; the action saves that at job end.
+  # The upgrade job then sets up the newest kapi with the same plugins input,
+  # and the bowrain it is left with must be the one this kapi installs fresh.
+  # Windows is absent because the registry has only one Windows bowrain build,
+  # so no older one can be cached there.
+  test-plugin-seed:
+    name: "Plugin cache seed (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup an older kapi
+        uses: ./
+        with:
+          token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+          version: ${{ env.PLUGIN_SEED_KAPI_VERSION }}
+          plugins: bowrain
+          cache-tm: "false"
+
+      - name: Leave an older bowrain in the plugin root
+        shell: bash
+        run: |
+          kapi plugin install "bowrain@${PLUGIN_SEED_BOWRAIN_VERSION}"
+          grep -q "\"${PLUGIN_SEED_BOWRAIN_VERSION}\"" ~/.local/share/kapi/plugins/bowrain/installed.json
+
+  test-plugin-upgrade:
+    name: "Plugin cache after a kapi upgrade (${{ matrix.os }})"
+    needs: test-plugin-seed
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup the newest kapi
+        id: setup
+        uses: ./
+        with:
+          token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+          plugins: bowrain
+          cache-tm: "false"
+
+      - name: Require a newer kapi than the seed
+        shell: bash
+        env:
+          INSTALLED: ${{ steps.setup.outputs.version }}
+        run: test "${INSTALLED}" != "${PLUGIN_SEED_KAPI_VERSION}"
+
+      - name: Verify bowrain matches a fresh install
+        shell: bash
+        run: test/plugins/matches-fresh.sh bowrain
+
+  # The plugin set the upgrade job saved is restored for the same kapi.
+  test-plugin-cache-hit:
+    name: "Plugin cache hit (${{ matrix.os }})"
+    needs: test-plugin-upgrade
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup the newest kapi
+        id: setup
+        uses: ./
+        with:
+          token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+          plugins: bowrain
+          cache-tm: "false"
+
+      - name: Require a plugin cache hit
+        shell: bash
+        env:
+          CACHE_HIT: ${{ steps.setup.outputs.cache-hit }}
+        run: test "${CACHE_HIT}" = "true"
+
+      - name: Verify bowrain matches a fresh install
+        shell: bash
+        run: test/plugins/matches-fresh.sh bowrain
