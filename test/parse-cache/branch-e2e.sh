@@ -17,6 +17,15 @@ shift
 
 pc="${KAPI_PARSE_CACHE_DIR:?KAPI_PARSE_CACHE_DIR is not set}"
 
+# These jobs install release 1.4.0-rc5 and then run the #3804 build, so the
+# cache key names 1.4.0-rc5 and the restore can bring the in-tree cache another
+# job saved with the real 1.4.0-rc5. Remove it, so the check below sees only
+# what this build writes.
+if [ -e test/fixture/.kapi/work ]; then
+  echo "note: removed test/fixture/.kapi/work, restored from a 1.4.0-rc5 in-tree cache"
+  rm -rf test/fixture/.kapi/work
+fi
+
 mode_of() {
   if stat -c '%a' "$1" > /dev/null 2>&1; then stat -c '%a %U' "$1"; else stat -f '%Lp %Su' "$1"; fi
 }
