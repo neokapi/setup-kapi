@@ -574,7 +574,8 @@ jobs:
         uses: ./
         with:
           token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
-          version: 1.4.0-rc5
+          # Not a version any other job caches under, so the key is this pair's own.
+          version: 1.2.0
           plugins: ""
           project-dir: test/fixture
 
@@ -624,7 +625,8 @@ jobs:
         uses: ./
         with:
           token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
-          version: 1.4.0-rc5
+          # Not a version any other job caches under, so the key is this pair's own.
+          version: 1.2.0
           plugins: ""
           project-dir: test/fixture
 
@@ -685,3 +687,10 @@ jobs:
       - name: Every kapi command fails with kapi's message
         shell: bash
         run: test/parse-cache/branch-e2e.sh refuse "${RUNNER_TEMP}/e2e/refuse"
+
+      # Leave nothing for the post step to save: a widened directory saved
+      # into the cache would be restored, and refused, by every later run.
+      - name: Remove the refused directory
+        if: always()
+        shell: bash
+        run: rm -rf "${KAPI_PARSE_CACHE_DIR}"
