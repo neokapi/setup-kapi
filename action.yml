@@ -235,45 +235,64 @@ runs:
           echo "found=false" >> "$GITHUB_OUTPUT"
         fi
 
-    # 13. Find the directory that holds the parse cache for this kapi, and
-    #     prepare it. A kapi that keeps each checkout's state outside the
-    #     checkout prints that directory with `kapi state path`; its name
-    #     changes from run to run, so the cache is carried through a fixed
-    #     directory under runner.temp that the state directory links to. An
-    #     older kapi keeps the parse cache in the checkout. See
-    #     scripts/parse-cache-dir.sh.
-    - name: Locate kapi parse cache
+    # 13. Name the directory kapi keeps its parse cache in. A kapi that reads
+    #     KAPI_PARSE_CACHE_DIR keeps the parse cache there; a kapi up to 1.3
+    #     ignores the variable and keeps it in the checkout, at
+    #     .kapi/work/cache/docs. The cache step carries both paths, and the one
+    #     the installed kapi does not use is absent. Both are the same strings
+    #     on every run, which keeps the cache version stable.
+    #
+    #     A KAPI_PARSE_CACHE_DIR the workflow set itself is kept, and cached
+    #     when it lies under runner.temp or the workspace; otherwise the
+    #     parse cache is not carried.
+    - name: Set kapi parse cache directory
       id: parse-cache-dir
       if: steps.parse-cache.outputs.enabled != 'false' && steps.detect-project.outputs.found == 'true'
       shell: bash
       env:
-        ACTION_PATH: ${{ github.action_path }}
-        PROJECT_DIR: ${{ inputs.project-dir }}
-        FIXED_DIR: ${{ runner.temp }}/setup-kapi-parse-cache
+        FIXED_DIR: ${{ runner.temp }}/kapi-parse-cache
       run: |
-        set -o pipefail
-        "${ACTION_PATH}/scripts/parse-cache-dir.sh" "${PROJECT_DIR}" "${FIXED_DIR}" | tee -a "$GITHUB_OUTPUT"
+        if [ -z "${KAPI_PARSE_CACHE_DIR:-}" ]; then
+          echo "KAPI_PARSE_CACHE_DIR=${FIXED_DIR}" >> "$GITHUB_ENV"
+          echo "dir=${FIXED_DIR}" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        dir="${KAPI_PARSE_CACHE_DIR}"
+        case "/${dir//\\//}/" in
+          */../*)
+            echo "::warning title=setup-kapi::KAPI_PARSE_CACHE_DIR (${dir}) has a '..' component, so the parse cache is not carried."
+            exit 0
+            ;;
+        esac
+        for base in "${RUNNER_TEMP%[/\\]}" "${GITHUB_WORKSPACE%[/\\]}"; do
+          [ -n "${base}" ] || continue
+          case "${dir}" in
+            "${base}"/* | "${base}"\\*)
+              echo "dir=${dir}" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+        done
+        echo "::warning title=setup-kapi::KAPI_PARSE_CACHE_DIR (${dir}) is not under runner.temp or the workspace, so the parse cache is not carried."
 
     # 14. Restore kapi's parse cache, and save it at job end. The key is unique
-    #     to the job and run attempt, so actions/cache saves through its own
-    #     post step; the restore takes the newest cache for the same kapi
-    #     version, preferring the same ref.
+    #     to the job and run attempt, so every run saves its own cache through
+    #     actions/cache's post step, and the restore takes the newest cache for
+    #     the same kapi version, preferring the same ref. The key hashes no
+    #     source file: kapi keys each entry by the file's path and content
+    #     hash, the parse configuration, the recipe and the kapi build, and
+    #     parses again on any mismatch, so an older cache is still useful after
+    #     a source edit, and a restored entry is either valid for the checkout
+    #     or ignored.
     #
-    #     Only the parse cache (work/cache/docs) is carried. kapi keys each
-    #     entry by the file's absolute path and content hash, the parse
-    #     configuration, the recipe and the kapi build, and parses again on any
-    #     mismatch, so a restored entry is either valid for the checkout or
-    #     ignored. The rest of the work directory stays out of the cache:
-    #       - store.db holds the checkout's block cache and the targets a run
-    #         wrote; restored, it changes what kapi status, kapi check --ship
-    #         and kapi up report.
-    #       - cache/extractions holds kapi extract batches that kapi merge reads.
-    #       - cache/redaction and vault/ hold withheld original values.
-    #       - the sync state holds a claim token.
-    #     The project's context (terms, voice profiles, content memory and
-    #     recorded decisions) lives in kapi's workspace outside the checkout. A
-    #     job fetches it with `kapi context pull`, which this action leaves to
-    #     kapi-action's context-sync input or the workflow's own step.
+    #     Only the parse cache is carried. The project store, the extraction
+    #     batches, the redaction vault and the sync state (with its claim
+    #     token) stay out: a restored store changes what kapi status, kapi
+    #     check --ship and kapi up report, and the rest belongs to the
+    #     checkout that wrote it. The project's context lives in kapi's
+    #     workspace; a job fetches it with `kapi context pull`, which this
+    #     action leaves to kapi-action's context-sync input or the workflow's
+    #     own step.
     #
     #     The kapi version is part of the key because the parse cache keeps the
     #     entries every build wrote; a new version starts from an empty cache.
@@ -285,20 +304,24 @@ runs:
     #     pull_request_target run executes in the base branch's scope, so there
     #     the cache is restored and never saved.
     - name: Restore kapi parse cache
-      if: steps.parse-cache-dir.outputs.path != '' && github.event_name != 'pull_request_target'
+      if: steps.parse-cache-dir.outputs.dir != '' && github.event_name != 'pull_request_target'
       uses: actions/cache@v5
       with:
-        path: ${{ steps.parse-cache-dir.outputs.path }}
+        path: |
+          ${{ steps.parse-cache-dir.outputs.dir }}
+          ${{ inputs.project-dir }}/.kapi/work/cache/docs
         key: kapi-parse-${{ runner.os }}-${{ steps.resolve.outputs.version }}-${{ github.ref_name }}-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
         restore-keys: |
           kapi-parse-${{ runner.os }}-${{ steps.resolve.outputs.version }}-${{ github.ref_name }}-
           kapi-parse-${{ runner.os }}-${{ steps.resolve.outputs.version }}-
 
     - name: Restore kapi parse cache (no save)
-      if: steps.parse-cache-dir.outputs.path != '' && github.event_name == 'pull_request_target'
+      if: steps.parse-cache-dir.outputs.dir != '' && github.event_name == 'pull_request_target'
       uses: actions/cache/restore@v5
       with:
-        path: ${{ steps.parse-cache-dir.outputs.path }}
+        path: |
+          ${{ steps.parse-cache-dir.outputs.dir }}
+          ${{ inputs.project-dir }}/.kapi/work/cache/docs
         key: kapi-parse-${{ runner.os }}-${{ steps.resolve.outputs.version }}-${{ github.ref_name }}-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
         restore-keys: |
           kapi-parse-${{ runner.os }}-${{ steps.resolve.outputs.version }}-${{ github.ref_name }}-
