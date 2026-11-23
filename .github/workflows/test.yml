@@ -507,3 +507,67 @@ jobs:
       - name: Verify bowrain matches a fresh install
         shell: bash
         run: test/plugins/matches-fresh.sh bowrain
+
+  # TEMPORARY: measures the owner and mode of a parse cache directory after an
+  # actions/cache round trip, on each hosted runner. Remove before merging.
+  probe-cache-mode-save:
+    name: "Probe cache mode: save (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Make a 0700 directory with files
+        shell: bash
+        run: |
+          d="${RUNNER_TEMP}/kapi-parse-cache"
+          mkdir -m 700 "$d"
+          echo entry > "$d/index.db"
+          (umask 077; echo part > "$d/parts-a.log")
+          mkdir -m 700 "$d/sub"
+          echo x > "$d/sub/blob"
+          echo "umask: $(umask)"
+          if stat -c '%A %U:%G %a %n' "$d" > /dev/null 2>&1; then
+            stat -c '%A %U:%G %a %n' "$d" "$d"/* "$d/sub/blob"
+          else
+            stat -f '%Sp %Su:%Sg %Lp %N' "$d" "$d"/* "$d/sub/blob"
+          fi
+          if [ "$RUNNER_OS" = Windows ]; then icacls "$(cygpath -w "$d")"; fi
+
+      - uses: actions/cache/save@v5
+        with:
+          path: |
+            ${{ runner.temp }}/kapi-parse-cache
+            test/fixture/.kapi/work/cache/docs
+          key: probe-mode-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+  probe-cache-mode-restore:
+    name: "Probe cache mode: restore (${{ matrix.os }})"
+    needs: probe-cache-mode-save
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/cache/restore@v5
+        with:
+          path: |
+            ${{ runner.temp }}/kapi-parse-cache
+            test/fixture/.kapi/work/cache/docs
+          key: probe-mode-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          fail-on-cache-miss: true
+
+      - name: Print owner and mode of what was restored
+        shell: bash
+        run: |
+          d="${RUNNER_TEMP}/kapi-parse-cache"
+          echo "user: $(id -un 2>/dev/null || whoami) umask: $(umask)"
+          ls -ld "$d"
+          if stat -c '%A %U:%G %a %n' "$d" > /dev/null 2>&1; then
+            stat -c '%A %U:%G %a %n' "$d" "$d"/* "$d/sub/blob"
+          else
+            stat -f '%Sp %Su:%Sg %Lp %N' "$d" "$d"/* "$d/sub/blob"
+          fi
+          if [ "$RUNNER_OS" = Windows ]; then icacls "$(cygpath -w "$d")"; icacls "$(cygpath -w "$d/index.db")"; fi
