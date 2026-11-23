@@ -332,6 +332,8 @@ runs:
     #
     #     The kapi version is part of the key because the parse cache keeps the
     #     entries every build wrote; a new version starts from an empty cache.
+    #     An underscore ends the version, a character no release version holds,
+    #     so the restore prefix for 1.4.0 does not match a 1.4.0-rc5 cache.
     #
     #     GitHub scopes caches by ref: a run restores caches its own ref saved
     #     and those of the default branch (and a pull request's base), never
@@ -347,10 +349,10 @@ runs:
         path: |
           ${{ steps.parse-cache-dir.outputs.dir }}
           ${{ inputs.project-dir }}/.kapi/work/cache/docs
-        key: kapi-parse-${{ runner.os }}-${{ steps.resolve.outputs.version }}-${{ github.ref_name }}-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+        key: kapi-parse-${{ runner.os }}-${{ steps.resolve.outputs.version }}_${{ github.ref_name }}-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
         restore-keys: |
-          kapi-parse-${{ runner.os }}-${{ steps.resolve.outputs.version }}-${{ github.ref_name }}-
-          kapi-parse-${{ runner.os }}-${{ steps.resolve.outputs.version }}-
+          kapi-parse-${{ runner.os }}-${{ steps.resolve.outputs.version }}_${{ github.ref_name }}-
+          kapi-parse-${{ runner.os }}-${{ steps.resolve.outputs.version }}_
 
     - name: Restore kapi parse cache (no save)
       if: steps.parse-cache-dir.outputs.dir != '' && contains(fromJSON('["pull_request_target","workflow_run","issue_comment"]'), github.event_name)
@@ -359,7 +361,7 @@ runs:
         path: |
           ${{ steps.parse-cache-dir.outputs.dir }}
           ${{ inputs.project-dir }}/.kapi/work/cache/docs
-        key: kapi-parse-${{ runner.os }}-${{ steps.resolve.outputs.version }}-${{ github.ref_name }}-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+        key: kapi-parse-${{ runner.os }}-${{ steps.resolve.outputs.version }}_${{ github.ref_name }}-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
         restore-keys: |
-          kapi-parse-${{ runner.os }}-${{ steps.resolve.outputs.version }}-${{ github.ref_name }}-
-          kapi-parse-${{ runner.os }}-${{ steps.resolve.outputs.version }}-
+          kapi-parse-${{ runner.os }}-${{ steps.resolve.outputs.version }}_${{ github.ref_name }}-
+          kapi-parse-${{ runner.os }}-${{ steps.resolve.outputs.version }}_
