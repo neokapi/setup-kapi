@@ -59,6 +59,9 @@ run_case() {
   else
     ! grep -q '^::warning' "${dir}/stdout" || fail "${name}" "unexpected warning: $(cat "${dir}/stdout")"
   fi
+  if [ -z "${want_dir}" ] && [ -s "${dir}/output" ]; then
+    fail "${name}" "wrote outputs: $(cat "${dir}/output")"
+  fi
   [ ! -e "${temp}" ] || fail "${name}" "created a directory"
   if [ "${failures}" = "${before}" ]; then
     echo "ok   ${name}"
@@ -72,6 +75,28 @@ run_case preset-outside "/home/runner/.cache/kapi" "" "" yes
 run_case preset-relative "kapi-parse-cache" "" "" yes
 run_case preset-dotdot "${temp}/../elsewhere" "" "" yes
 run_case preset-prefix "${temp}-other/cache" "" "" yes
+run_case preset-newline "${temp}/x
+dir=/etc/ssl" "" "" yes
+run_case preset-cr "${temp}/x$(printf '\r')" "" "" yes
+run_case preset-temp-itself "${temp}" "" "" yes
+run_case preset-temp-slash "${temp}/" "" "" yes
+run_case preset-temp-dot "${temp}/." "" "" yes
+run_case preset-temp-dots "${temp}/./" "" "" yes
+run_case preset-temp-nested "${temp}/a/./b" "${temp}/a/./b" "" no
+
+# The auth step writes each value with a random delimiter, so a line break in
+# a token cannot add another variable.
+yq '.runs.steps[] | select(.name == "Configure auth") | .run' "${root}/action.yml" > "${work}/auth.sh"
+: > "${work}/auth.env"
+env INPUT_AUTH_TOKEN="tok
+BASH_ENV=/tmp/evil" INPUT_SERVER="https://example.invalid" GITHUB_ENV="${work}/auth.env" \
+  bash -e "${work}/auth.sh" > /dev/null
+names="$(awk 'd != "" { if ($0 == d) d = ""; next } /<</ { i = index($0, "<<"); print substr($0, 1, i - 1); d = substr($0, i + 2); next } /=/ { print substr($0, 1, index($0, "=") - 1) }' "${work}/auth.env" | tr '\n' ' ')"
+if [ "${names}" = "BOWRAIN_AUTH_TOKEN BOWRAIN_SERVER_URL " ]; then
+  echo "ok   auth: a line break in the token sets no other variable"
+else
+  fail auth "variables set: ${names}"
+fi
 
 # Both parse cache steps carry the directory the step names and the in-tree
 # path, as fixed strings.

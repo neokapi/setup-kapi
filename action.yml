@@ -74,6 +74,14 @@ runs:
         ACTION_PATH: ${{ github.action_path }}
       run: |
         VERSION=$("${ACTION_PATH}/scripts/resolve-version.sh" "${INPUT_VERSION}")
+        # The version names a release tag and becomes an output and a cache
+        # key, so it may hold only the characters a release version has.
+        case "${VERSION}" in
+          "" | *[!0-9A-Za-z.+-]*)
+            echo "::error title=setup-kapi::The version input is not a release version."
+            exit 1
+            ;;
+        esac
         echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
         echo "Resolved version: ${VERSION}"
 
@@ -138,9 +146,16 @@ runs:
         INPUT_AUTH_TOKEN: ${{ inputs.auth-token }}
         INPUT_SERVER: ${{ inputs.server }}
       run: |
-        echo "BOWRAIN_AUTH_TOKEN=${INPUT_AUTH_TOKEN}" >> "$GITHUB_ENV"
+        # The multi-line form with a random delimiter, so a line break in a
+        # value cannot start another variable.
+        put_env() {
+          local delim
+          delim="SETUP_KAPI_EOF_$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          printf '%s<<%s\n%s\n%s\n' "$1" "${delim}" "$2" "${delim}" >> "$GITHUB_ENV"
+        }
+        put_env BOWRAIN_AUTH_TOKEN "${INPUT_AUTH_TOKEN}"
         if [ -n "${INPUT_SERVER}" ]; then
-          echo "BOWRAIN_SERVER_URL=${INPUT_SERVER}" >> "$GITHUB_ENV"
+          put_env BOWRAIN_SERVER_URL "${INPUT_SERVER}"
         fi
         echo "Auth configured for kapi"
 
@@ -215,7 +230,13 @@ runs:
           echo "::warning title=setup-kapi::The cache-tm input is deprecated; use parse-cache instead."
           ENABLED="${INPUT_CACHE_TM}"
         fi
-        echo "enabled=${ENABLED}" >> "$GITHUB_OUTPUT"
+        # Only 'false' turns the cache off, as before; write nothing else of
+        # the input to the output.
+        if [ "${ENABLED}" = "false" ]; then
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+        fi
 
     # 12. Detect a kapi project: a committed kapi.yaml recipe (or legacy *.kapi).
     #     The parse cache is carried only for a project. The recipe is the
@@ -263,22 +284,32 @@ runs:
           exit 0
         fi
         dir="${KAPI_PARSE_CACHE_DIR}"
-        case "/${dir//\\//}/" in
-          */../*)
-            echo "::warning title=setup-kapi::KAPI_PARSE_CACHE_DIR (${dir}) has a '..' component, so the parse cache is not carried."
-            exit 0
-            ;;
+        skip() {
+          echo "::warning title=setup-kapi::KAPI_PARSE_CACHE_DIR $1, so the parse cache is not carried."
+          exit 0
+        }
+        case "${dir}" in
+          *[[:cntrl:]]*) skip "contains a control character" ;;
         esac
         base="${RUNNER_TEMP%[/\\]}"
-        if [ -n "${base}" ]; then
-          case "${dir}" in
-            "${base}"/* | "${base}"\\*)
-              echo "dir=${dir}" >> "$GITHUB_OUTPUT"
-              exit 0
-              ;;
+        [ -n "${base}" ] || skip "cannot be checked, because RUNNER_TEMP is not set"
+        case "${dir}" in
+          "${base}"/* | "${base}"\\*) rel="${dir:${#base}+1}" ;;
+          *) skip "(${dir}) is not under runner.temp" ;;
+        esac
+        # Count the components below runner.temp, ignoring empty ones and
+        # '.'; a '..' refuses the value outright.
+        IFS='/\' read -ra parts <<< "${rel}"
+        depth=0
+        for part in ${parts[@]+"${parts[@]}"}; do
+          case "${part}" in
+            "" | .) ;;
+            ..) skip "(${dir}) has a '..' component" ;;
+            *) depth=$((depth + 1)) ;;
           esac
-        fi
-        echo "::warning title=setup-kapi::KAPI_PARSE_CACHE_DIR (${dir}) is not under runner.temp, so the parse cache is not carried."
+        done
+        [ "${depth}" -gt 0 ] || skip "(${dir}) names runner.temp itself"
+        echo "dir=${dir}" >> "$GITHUB_OUTPUT"
 
     # 14. Restore kapi's parse cache, and save it at job end. The key is unique
     #     to the job and run attempt, so every run saves its own cache through
@@ -306,10 +337,11 @@ runs:
     #     and those of the default branch (and a pull request's base), never
     #     another branch's or a pull request's, so a pull request from a fork
     #     cannot reach the default branch's runs through this cache. A
-    #     pull_request_target run executes in the base branch's scope, so there
-    #     the cache is restored and never saved.
+    #     pull_request_target, workflow_run or issue_comment run executes in
+    #     the default (or base) branch's scope and often on behalf of someone
+    #     who cannot push, so there the cache is restored and never saved.
     - name: Restore kapi parse cache
-      if: steps.parse-cache-dir.outputs.dir != '' && github.event_name != 'pull_request_target'
+      if: steps.parse-cache-dir.outputs.dir != '' && !contains(fromJSON('["pull_request_target","workflow_run","issue_comment"]'), github.event_name)
       uses: actions/cache@v5
       with:
         path: |
@@ -321,7 +353,7 @@ runs:
           kapi-parse-${{ runner.os }}-${{ steps.resolve.outputs.version }}-
 
     - name: Restore kapi parse cache (no save)
-      if: steps.parse-cache-dir.outputs.dir != '' && github.event_name == 'pull_request_target'
+      if: steps.parse-cache-dir.outputs.dir != '' && contains(fromJSON('["pull_request_target","workflow_run","issue_comment"]'), github.event_name)
       uses: actions/cache/restore@v5
       with:
         path: |
