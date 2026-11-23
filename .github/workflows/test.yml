@@ -507,3 +507,35 @@ jobs:
       - name: Verify bowrain matches a fresh install
         shell: bash
         run: test/plugins/matches-fresh.sh bowrain
+
+  # A token passed as a plain value through the real action reaches later
+  # steps intact, and its line break starts no other variable. The token's
+  # second line has the shape of an assignment.
+  test-auth-env:
+    name: "Auth token through GITHUB_ENV (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup kapi with a dummy token
+        uses: ./
+        with:
+          token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+          plugins: ""
+          auth-token: "dummy-token-a\nSETUP_KAPI_INJECTED=1"
+          server: https://bowrain.invalid
+
+      - name: Read the variables back
+        shell: bash
+        run: |
+          want="$(printf 'dummy-token-a\nSETUP_KAPI_INJECTED=1')"
+          test "${BOWRAIN_AUTH_TOKEN}" = "${want}"
+          test "${BOWRAIN_SERVER_URL}" = "https://bowrain.invalid"
+          test -z "${SETUP_KAPI_INJECTED+set}"
+          if env | grep -q '^SETUP_KAPI_EOF'; then exit 1; fi
+          echo "BOWRAIN_AUTH_TOKEN and BOWRAIN_SERVER_URL arrived intact; no other variable was set."
+

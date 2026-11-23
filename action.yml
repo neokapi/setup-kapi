@@ -146,6 +146,11 @@ runs:
         INPUT_AUTH_TOKEN: ${{ inputs.auth-token }}
         INPUT_SERVER: ${{ inputs.server }}
       run: |
+        # Mask the token before anything else touches it, each line on its
+        # own, so a token passed as a plain value stays out of later logs.
+        while IFS= read -r line; do
+          if [ -n "${line}" ]; then echo "::add-mask::${line}"; fi
+        done <<< "${INPUT_AUTH_TOKEN}"
         # The multi-line form with a random delimiter, so a line break in a
         # value cannot start another variable.
         put_env() {
@@ -230,9 +235,10 @@ runs:
           echo "::warning title=setup-kapi::The cache-tm input is deprecated; use parse-cache instead."
           ENABLED="${INPUT_CACHE_TM}"
         fi
-        # Only 'false' turns the cache off, as before; write nothing else of
-        # the input to the output.
-        if [ "${ENABLED}" = "false" ]; then
+        # Only 'false' turns the cache off, compared without regard to case
+        # as v1's expression `inputs.cache-tm != 'false'` did; write nothing
+        # else of the input to the output.
+        if [ "$(printf '%s' "${ENABLED}" | tr '[:upper:]' '[:lower:]')" = "false" ]; then
           echo "enabled=false" >> "$GITHUB_OUTPUT"
         else
           echo "enabled=true" >> "$GITHUB_OUTPUT"

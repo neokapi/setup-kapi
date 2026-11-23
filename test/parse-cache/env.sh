@@ -97,6 +97,39 @@ if [ "${names}" = "BOWRAIN_AUTH_TOKEN BOWRAIN_SERVER_URL " ]; then
 else
   fail auth "variables set: ${names}"
 fi
+masks="$(env INPUT_AUTH_TOKEN="tok
+BASH_ENV=/tmp/evil
+" INPUT_SERVER="" GITHUB_ENV=/dev/null bash -e "${work}/auth.sh" | grep '^::add-mask::' | tr '\n' ' ')"
+if [ "${masks}" = "::add-mask::tok ::add-mask::BASH_ENV=/tmp/evil " ]; then
+  echo "ok   auth: each line of the token is masked"
+else
+  fail auth-mask "mask commands: '${masks}'"
+fi
+
+# parse-cache and cache-tm turn the cache off on 'false' in any case, as v1's
+# expression did, and on nothing else.
+yq '.runs.steps[] | select(.id == "parse-cache") | .run' "${root}/action.yml" > "${work}/enabled.sh"
+# enabled_case PARSE_CACHE CACHE_TM WANT
+enabled_case() {
+  : > "${work}/enabled.out"
+  env INPUT_PARSE_CACHE="$1" INPUT_CACHE_TM="$2" GITHUB_OUTPUT="${work}/enabled.out" \
+    bash -e "${work}/enabled.sh" > /dev/null
+  local got
+  got="$(cat "${work}/enabled.out")"
+  if [ "${got}" = "enabled=$3" ]; then
+    echo "ok   parse-cache='$1' cache-tm='$2': $3"
+  else
+    fail enabled "parse-cache='$1' cache-tm='$2': got '${got}', want 'enabled=$3'"
+  fi
+}
+for value in false False FALSE; do
+  enabled_case "${value}" "" false
+  enabled_case true "${value}" false
+done
+enabled_case true "" true
+enabled_case false true true
+enabled_case "no" "" true
+
 
 # Both parse cache steps carry the directory the step names and the in-tree
 # path, as fixed strings.
