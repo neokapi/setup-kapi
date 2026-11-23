@@ -243,8 +243,13 @@ runs:
     #     on every run, which keeps the cache version stable.
     #
     #     A KAPI_PARSE_CACHE_DIR the workflow set itself is kept, and cached
-    #     when it lies under runner.temp or the workspace; otherwise the
-    #     parse cache is not carried.
+    #     when it lies under runner.temp; otherwise the parse cache is not
+    #     carried. (kapi refuses a directory inside the checkout.)
+    #
+    #     The step creates no directory. kapi creates the parse cache
+    #     directory with owner-only permissions (0700) and refuses one that is
+    #     wider, a link, or owned by someone else; a directory made here with
+    #     a plain mkdir would be 0755 and be saved, and restored, that way.
     - name: Set kapi parse cache directory
       id: parse-cache-dir
       if: steps.parse-cache.outputs.enabled != 'false' && steps.detect-project.outputs.found == 'true'
@@ -264,16 +269,16 @@ runs:
             exit 0
             ;;
         esac
-        for base in "${RUNNER_TEMP%[/\\]}" "${GITHUB_WORKSPACE%[/\\]}"; do
-          [ -n "${base}" ] || continue
+        base="${RUNNER_TEMP%[/\\]}"
+        if [ -n "${base}" ]; then
           case "${dir}" in
             "${base}"/* | "${base}"\\*)
               echo "dir=${dir}" >> "$GITHUB_OUTPUT"
               exit 0
               ;;
           esac
-        done
-        echo "::warning title=setup-kapi::KAPI_PARSE_CACHE_DIR (${dir}) is not under runner.temp or the workspace, so the parse cache is not carried."
+        fi
+        echo "::warning title=setup-kapi::KAPI_PARSE_CACHE_DIR (${dir}) is not under runner.temp, so the parse cache is not carried."
 
     # 14. Restore kapi's parse cache, and save it at job end. The key is unique
     #     to the job and run attempt, so every run saves its own cache through

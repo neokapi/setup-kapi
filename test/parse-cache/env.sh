@@ -67,7 +67,7 @@ run_case() {
 
 run_case unset "" "${temp}/kapi-parse-cache" "KAPI_PARSE_CACHE_DIR=${temp}/kapi-parse-cache" no
 run_case preset-temp "${temp}/mine" "${temp}/mine" "" no
-run_case preset-workspace "${workspace}/.cache/kapi" "${workspace}/.cache/kapi" "" no
+run_case preset-workspace "${workspace}/.cache/kapi" "" "" yes
 run_case preset-outside "/home/runner/.cache/kapi" "" "" yes
 run_case preset-relative "kapi-parse-cache" "" "" yes
 run_case preset-dotdot "${temp}/../elsewhere" "" "" yes
