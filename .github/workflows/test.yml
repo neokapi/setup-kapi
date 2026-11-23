@@ -522,10 +522,11 @@ jobs:
         shell: bash
         run: |
           d="${RUNNER_TEMP}/kapi-parse-cache"
-          mkdir -m 700 "$d"
+          # Git Bash on Windows cannot set a mode with mkdir -m.
+          if [ "$RUNNER_OS" = Windows ]; then mkdir "$d"; else mkdir -m 700 "$d"; fi
           echo entry > "$d/index.db"
           (umask 077; echo part > "$d/parts-a.log")
-          mkdir -m 700 "$d/sub"
+          if [ "$RUNNER_OS" = Windows ]; then mkdir "$d/sub"; else mkdir -m 700 "$d/sub"; fi
           echo x > "$d/sub/blob"
           echo "umask: $(umask)"
           if stat -c '%A %U:%G %a %n' "$d" > /dev/null 2>&1; then
@@ -545,6 +546,7 @@ jobs:
   probe-cache-mode-restore:
     name: "Probe cache mode: restore (${{ matrix.os }})"
     needs: probe-cache-mode-save
+    if: ${{ !cancelled() }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
