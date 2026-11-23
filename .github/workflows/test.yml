@@ -17,10 +17,12 @@ env:
   # The state cache jobs need kapi 1.2, the first release that keeps its state
   # under .kapi/work/.
   STATE_CACHE_KAPI_VERSION: 1.2.0-rc32
-  # The plugin cache jobs seed a cache with this kapi and an older bowrain,
-  # then set up the newest kapi over it.
+  # The plugin cache jobs seed a cache with this kapi and a bowrain the newest
+  # stable kapi does not pick on a fresh install, then set up the newest kapi
+  # over it. The registry lists bowrain 1.3.0 (stable) and 1.4.0-rc5 (beta)
+  # only (registry#6), so the seed is the beta.
   PLUGIN_SEED_KAPI_VERSION: 1.2.0
-  PLUGIN_SEED_BOWRAIN_VERSION: 1.0.2
+  PLUGIN_SEED_BOWRAIN_VERSION: 1.4.0-rc5
 
 jobs:
   test-latest:
@@ -36,8 +38,17 @@ jobs:
       - name: Setup kapi (latest)
         id: setup
         uses: ./
+        # No bowrain build is listed for Windows until the next kapi release
+        # (registry#6, a founder decision), so the Windows run installs no
+        # plugin and the step below asserts the install still fails there.
         with:
           token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+          plugins: ${{ matrix.os != 'windows-latest' && 'bowrain' || '' }}
+
+      - name: Assert no bowrain build is listed for Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: test/plugins/windows-unlisted.sh
 
       - name: Verify version output
         shell: bash
@@ -80,9 +91,18 @@ jobs:
       - name: Setup kapi (pinned)
         id: setup
         uses: ./
+        # No bowrain build is listed for Windows until the next kapi release
+        # (registry#6, a founder decision), so the Windows run installs no
+        # plugin and the step below asserts the install still fails there.
         with:
           token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
           version: ${{ steps.version.outputs.version }}
+          plugins: ${{ matrix.os != 'windows-latest' && 'bowrain' || '' }}
+
+      - name: Assert no bowrain build is listed for Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: test/plugins/windows-unlisted.sh
 
       - name: Verify correct version
         shell: bash
@@ -264,6 +284,98 @@ jobs:
           name: state-cache-restore-${{ matrix.os }}
           path: ${{ runner.temp }}/results
 
+  # parse-cache and its deprecated name cache-tm. The save job left a parse
+  # cache to restore, and no kapi command runs here, so whether the cache
+  # directory exists after setup shows which value the action acted on. When
+  # cache-tm is set, it decides.
+  test-parse-cache-input:
+    name: "Parse cache input (${{ matrix.case }})"
+    needs: test-state-cache-save
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - case: "parse-cache: false"
+            parse_cache: "false"
+            cache_tm: ""
+            restored: "false"
+          - case: "cache-tm: false"
+            parse_cache: "true"
+            cache_tm: "false"
+            restored: "false"
+          - case: "cache-tm: true over parse-cache: false"
+            parse_cache: "false"
+            cache_tm: "true"
+            restored: "true"
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup kapi
+        uses: ./
+        with:
+          token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+          version: ${{ env.STATE_CACHE_KAPI_VERSION }}
+          plugins: ""
+          project-dir: test/fixture
+          parse-cache: ${{ matrix.parse_cache }}
+          cache-tm: ${{ matrix.cache_tm }}
+
+      - name: Check whether the parse cache was restored
+        shell: bash
+        env:
+          WANT_RESTORED: ${{ matrix.restored }}
+        run: |
+          docs=test/fixture/.kapi/work/cache/docs
+          if [ "${WANT_RESTORED}" = "true" ]; then
+            test -s "${docs}/index.db"
+          else
+            test ! -e "${docs}"
+          fi
+
+  # The step that names the parse cache directory, run out of action.yml for
+  # each value KAPI_PARSE_CACHE_DIR can have, and the two paths both parse
+  # cache steps carry.
+  test-parse-cache-dir:
+    name: "Parse cache directory (KAPI_PARSE_CACHE_DIR)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run the parse cache directory harness
+        shell: bash
+        run: |
+          yq --version
+          test/parse-cache/env.sh
+
+  # Released kapi versions ignore KAPI_PARSE_CACHE_DIR and keep the parse
+  # cache in the checkout, which the action also carries.
+  test-parse-cache-in-tree:
+    name: "Parse cache in the checkout (kapi ${{ matrix.version }})"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["1.3.0", "1.4.0-rc5"]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup kapi
+        uses: ./
+        with:
+          token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+          version: ${{ matrix.version }}
+          plugins: ""
+          project-dir: test/fixture
+
+      - name: Check the exported directory and the in-tree cache
+        shell: bash
+        run: |
+          test "${KAPI_PARSE_CACHE_DIR}" = "${RUNNER_TEMP}/kapi-parse-cache"
+          kapi status -p test/fixture/kapi.yaml > /dev/null
+          test -s test/fixture/.kapi/work/cache/docs/index.db
+          test ! -e "${KAPI_PARSE_CACHE_DIR}"
+
   test-cache:
     name: "Cache hit (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
@@ -274,17 +386,27 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # First install — populates cache
+      # First install: populates the cache.
       - name: Setup kapi (first)
         uses: ./
+        # No bowrain build is listed for Windows until the next kapi release
+        # (registry#6, a founder decision), so the Windows run installs no
+        # plugin and the step below asserts the install still fails there.
         with:
           token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+          plugins: ${{ matrix.os != 'windows-latest' && 'bowrain' || '' }}
 
-      # Second install — should hit cache
+      # Second install: should hit the cache.
       - name: Setup kapi (cached)
         uses: ./
         with:
           token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+          plugins: ${{ matrix.os != 'windows-latest' && 'bowrain' || '' }}
+
+      - name: Assert no bowrain build is listed for Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: test/plugins/windows-unlisted.sh
 
       - name: Verify kapi works from cache
         shell: bash
@@ -292,16 +414,17 @@ jobs:
 
       # A cache hit installs no plugin, so check the cached one is current.
       - name: Verify the cached plugin is current
+        if: runner.os != 'Windows'
         shell: bash
         run: test/plugins/matches-fresh.sh bowrain
 
   # The plugin cache across a kapi upgrade. The seed job sets up an older kapi
-  # and leaves an older bowrain in the plugin root, as a cache saved before a
-  # newer bowrain was published would hold; the action saves that at job end.
+  # and leaves a bowrain in the plugin root that a fresh install by the newest
+  # kapi would not pick, as a cache saved for another kapi or registry entry
+  # would hold; the action saves that at job end.
   # The upgrade job then sets up the newest kapi with the same plugins input,
   # and the bowrain it is left with must be the one this kapi installs fresh.
-  # Windows is absent because the registry has only one Windows bowrain build,
-  # so no older one can be cached there.
+  # Windows is absent because the registry lists no Windows bowrain build.
   test-plugin-seed:
     name: "Plugin cache seed (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
@@ -318,12 +441,12 @@ jobs:
           token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
           version: ${{ env.PLUGIN_SEED_KAPI_VERSION }}
           plugins: bowrain
-          cache-tm: "false"
+          parse-cache: "false"
 
-      - name: Leave an older bowrain in the plugin root
+      - name: Leave a bowrain a fresh install would not pick
         shell: bash
         run: |
-          kapi plugin install "bowrain@${PLUGIN_SEED_BOWRAIN_VERSION}"
+          kapi plugin install --channel beta "bowrain@${PLUGIN_SEED_BOWRAIN_VERSION}"
           grep -q "\"${PLUGIN_SEED_BOWRAIN_VERSION}\"" ~/.local/share/kapi/plugins/bowrain/installed.json
 
   test-plugin-upgrade:
@@ -343,7 +466,7 @@ jobs:
         with:
           token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
           plugins: bowrain
-          cache-tm: "false"
+          parse-cache: "false"
 
       - name: Require a newer kapi than the seed
         shell: bash
@@ -373,7 +496,7 @@ jobs:
         with:
           token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
           plugins: bowrain
-          cache-tm: "false"
+          parse-cache: "false"
 
       - name: Require a plugin cache hit
         shell: bash
@@ -384,3 +507,35 @@ jobs:
       - name: Verify bowrain matches a fresh install
         shell: bash
         run: test/plugins/matches-fresh.sh bowrain
+
+  # A token passed as a plain value through the real action reaches later
+  # steps intact, and its line break starts no other variable. The token's
+  # second line has the shape of an assignment.
+  test-auth-env:
+    name: "Auth token through GITHUB_ENV (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup kapi with a dummy token
+        uses: ./
+        with:
+          token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+          plugins: ""
+          auth-token: "dummy-token-a\nSETUP_KAPI_INJECTED=1"
+          server: https://bowrain.invalid
+
+      - name: Read the variables back
+        shell: bash
+        run: |
+          want="$(printf 'dummy-token-a\nSETUP_KAPI_INJECTED=1')"
+          test "${BOWRAIN_AUTH_TOKEN}" = "${want}"
+          test "${BOWRAIN_SERVER_URL}" = "https://bowrain.invalid"
+          test -z "${SETUP_KAPI_INJECTED+set}"
+          if env | grep -q '^SETUP_KAPI_EOF'; then exit 1; fi
+          echo "BOWRAIN_AUTH_TOKEN and BOWRAIN_SERVER_URL arrived intact; no other variable was set."
+
