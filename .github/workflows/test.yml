@@ -507,3 +507,195 @@ jobs:
       - name: Verify bowrain matches a fresh install
         shell: bash
         run: test/plugins/matches-fresh.sh bowrain
+
+  # TEMPORARY: cold and warm runs of the kapi build from neokapi/neokapi main (24b78f1, with #3804)
+  # through this action. Removed before merging.
+  e2e-build-kapi:
+    name: "E2E: build kapi main 24b78f1 (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: neokapi/neokapi
+          ref: 24b78f17467f0ff31aaec2429d5417c2c45139d2
+          path: neokapi
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: neokapi/go.mod
+          cache-dependency-path: neokapi/**/go.sum
+
+      - name: Install ICU
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get update -q && sudo apt-get install -y -q libicu-dev pkg-config
+          else
+            brew list icu4c > /dev/null 2>&1 || brew install icu4c pkg-config
+            echo "PKG_CONFIG_PATH=$(brew --prefix icu4c)/lib/pkgconfig" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build kapi
+        shell: bash
+        working-directory: neokapi
+        run: |
+          go run ./core/i18n/gen/catalogs
+          cd kapi
+          go build -trimpath -tags fts5 -o "${RUNNER_TEMP}/kapi-branch/kapi" ./cmd/kapi
+          "${RUNNER_TEMP}/kapi-branch/kapi" version
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: kapi-3804-${{ matrix.os }}
+          path: ${{ runner.temp }}/kapi-branch
+          retention-days: 1
+
+  e2e-cold:
+    name: "E2E: cold run (${{ matrix.os }})"
+    needs: e2e-build-kapi
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: kapi-3804-${{ matrix.os }}
+          path: ${{ runner.temp }}/kapi-branch
+
+      - name: Setup kapi
+        uses: ./
+        with:
+          token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+          # Not a version any other job caches under, so the key is this pair's own.
+          version: 1.2.0
+          plugins: ""
+          project-dir: test/fixture
+
+      - name: Put the main 24b78f1 build first on PATH
+        shell: bash
+        run: |
+          chmod +x "${RUNNER_TEMP}/kapi-branch/kapi"
+          echo "${RUNNER_TEMP}/kapi-branch" >> "$GITHUB_PATH"
+
+      - name: Cold run
+        shell: bash
+        run: test/parse-cache/branch-e2e.sh cold "${RUNNER_TEMP}/e2e/cold"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: e2e-cold-${{ matrix.os }}
+          path: ${{ runner.temp }}/e2e/cold
+          retention-days: 1
+
+  e2e-warm:
+    name: "E2E: warm run (${{ matrix.os }})"
+    needs: e2e-cold
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: kapi-3804-${{ matrix.os }}
+          path: ${{ runner.temp }}/kapi-branch
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: e2e-cold-${{ matrix.os }}
+          path: ${{ runner.temp }}/e2e/cold
+
+      - name: Install strace
+        if: runner.os == 'Linux'
+        shell: bash
+        run: sudo apt-get install -y -q strace
+
+      - name: Setup kapi
+        uses: ./
+        with:
+          token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+          # Not a version any other job caches under, so the key is this pair's own.
+          version: 1.2.0
+          plugins: ""
+          project-dir: test/fixture
+
+      - name: Put the main 24b78f1 build first on PATH
+        shell: bash
+        run: |
+          chmod +x "${RUNNER_TEMP}/kapi-branch/kapi"
+          echo "${RUNNER_TEMP}/kapi-branch" >> "$GITHUB_PATH"
+
+      - name: Warm run
+        shell: bash
+        run: test/parse-cache/branch-e2e.sh warm "${RUNNER_TEMP}/e2e/cold" "${RUNNER_TEMP}/e2e/warm"
+
+  e2e-refuse:
+    name: "E2E: refused (${{ matrix.case }}, ${{ matrix.os }})"
+    needs: e2e-build-kapi
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        case: [inside-project, inside-repository, wider]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: kapi-3804-${{ matrix.os }}
+          path: ${{ runner.temp }}/kapi-branch
+
+      - name: Set a parse cache directory inside the project
+        if: matrix.case == 'inside-project'
+        shell: bash
+        run: echo "KAPI_PARSE_CACHE_DIR=${GITHUB_WORKSPACE}/test/fixture/.kapi-parse" >> "$GITHUB_ENV"
+
+      - name: Set a parse cache directory in the repository, outside the project
+        if: matrix.case == 'inside-repository'
+        shell: bash
+        run: echo "KAPI_PARSE_CACHE_DIR=${GITHUB_WORKSPACE}/.kapi-parse" >> "$GITHUB_ENV"
+
+      - name: Setup kapi
+        uses: ./
+        with:
+          token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+          version: 1.4.0-rc5
+          plugins: ""
+          project-dir: test/fixture
+
+      - name: Put the main 24b78f1 build first on PATH
+        shell: bash
+        run: |
+          chmod +x "${RUNNER_TEMP}/kapi-branch/kapi"
+          echo "${RUNNER_TEMP}/kapi-branch" >> "$GITHUB_PATH"
+
+      - name: Make the directory wider than kapi accepts
+        if: matrix.case == 'wider'
+        shell: bash
+        run: |
+          # A restored cache may already be there; widen it either way.
+          mkdir -p "${KAPI_PARSE_CACHE_DIR}"
+          chmod 755 "${KAPI_PARSE_CACHE_DIR}"
+
+      - name: Every kapi command fails with kapi's message
+        shell: bash
+        run: test/parse-cache/branch-e2e.sh refuse "${RUNNER_TEMP}/e2e/refuse"
+
+      # Leave nothing for the post step to save: a widened directory saved
+      # into the cache would be restored, and refused, by every later run.
+      - name: Remove the refused directory
+        if: always()
+        shell: bash
+        run: rm -rf "${KAPI_PARSE_CACHE_DIR}"
