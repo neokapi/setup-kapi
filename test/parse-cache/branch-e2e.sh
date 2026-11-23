@@ -94,8 +94,12 @@ case "${mode}" in
     if command -v strace > /dev/null; then
       strace -f -qq -e trace=openat -o "${results}/openat.txt" \
         "${root}/test/state-cache/run.sh" test/fixture "${results}/run"
-      opened="$(grep -c "${pc}/parts-[^\"]*\.log\", O_RDONLY" "${results}/openat.txt" || true)"
-      echo "the warm run opened recorded part files for reading ${opened} times" | tee -a "${results}/summary.txt"
+      # kapi opens a part file relative to the cache directory's descriptor,
+      # so the traced name is the bare file name.
+      opened="$(grep -cE 'openat2?\(.*"([^"]*/)?parts-[0-9a-f]+\.log".*O_RDONLY' "${results}/openat.txt" || true)"
+      echo "the warm run opened recorded part files for reading ${opened} times; examples:" | tee -a "${results}/summary.txt"
+      grep -E 'openat2?\(.*"([^"]*/)?parts-[0-9a-f]+\.log".*O_RDONLY' "${results}/openat.txt" | head -n 3 | tee -a "${results}/summary.txt" || true
+      grep -E 'parts-|index\.db' "${results}/openat.txt" | head -n 5 || true
       [ "${opened}" -gt 0 ] || { echo "::error::the warm run read no recorded part file"; exit 1; }
     else
       "${root}/test/state-cache/run.sh" test/fixture "${results}/run"
