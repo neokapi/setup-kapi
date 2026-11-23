@@ -72,7 +72,11 @@ case "${mode}" in
   cold)
     results="$1"
     mkdir -p "${results}"
-    [ ! -e "${pc}" ] || { echo "::error::the cold run found ${pc} already present"; exit 1; }
+    # An earlier run of this workflow may have left a cache under this key.
+    if [ -e "${pc}" ]; then
+      echo "note: removed ${pc}, restored from an earlier run, so this run starts cold"
+      rm -rf "${pc}"
+    fi
     "${root}/test/state-cache/run.sh" test/fixture "${results}/run"
     check_layout "${results}"
     snapshot "${pc}" > "${results}/snapshot.txt"
