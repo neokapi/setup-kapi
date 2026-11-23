@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# A stand-in for the kapi CLI that answers `kapi state path`. With
+# KAPI_STUB_STATE_DIR set it prints that directory, as a kapi that keeps each
+# checkout's state outside the checkout does; unset, it fails the way a kapi
+# without the command does.
+set -euo pipefail
+if [ "${1:-}" = "state" ] && [ "${2:-}" = "path" ] && [ -n "${KAPI_STUB_STATE_DIR:-}" ]; then
+  printf '%s\n' "${KAPI_STUB_STATE_DIR}"
+  exit 0
+fi
+echo "Error: unknown command \"${1:-}\" for \"kapi\"" >&2
+exit 1
