@@ -677,7 +677,10 @@ jobs:
       - name: Make the directory wider than kapi accepts
         if: matrix.case == 'wider'
         shell: bash
-        run: mkdir -m 755 "${KAPI_PARSE_CACHE_DIR}"
+        run: |
+          # A restored cache may already be there; widen it either way.
+          mkdir -p "${KAPI_PARSE_CACHE_DIR}"
+          chmod 755 "${KAPI_PARSE_CACHE_DIR}"
 
       - name: Every kapi command fails with kapi's message
         shell: bash
