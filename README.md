@@ -94,9 +94,8 @@ steps:
         okapi-bridge
 ```
 
-The plugin (bridge JARs included) is cached like any other, keyed on the
-plugin set + OS + arch, so the download cost is paid once per runner
-image.
+The plugin (bridge JARs included) is cached like any other, so the download
+is paid once for each kapi version and plugin release.
 
 ## How it works
 
@@ -105,12 +104,12 @@ image.
 3. **Download + verify** (on cache miss) — downloads the archive and `checksums.txt` from the GitHub release, verifies the SHA-256 checksum, and extracts the binary.
 4. **Add to PATH** — makes `kapi` available to all subsequent steps.
 5. **Configure auth** (optional) — exports `BOWRAIN_AUTH_TOKEN`/`BOWRAIN_SERVER_URL` when `auth-token` is set.
-6. **Install plugins** — installs each ref in `plugins` (default: `bowrain`) via `kapi plugins install`, cached keyed on the plugin set + OS + arch. Refs use the registry names; a `kapi-` binary prefix is stripped (`kapi-bowrain` → `bowrain`).
+6. **Install plugins** — installs each ref in `plugins` (default: `bowrain`) via `kapi plugins install`, cached as described below. Refs use the registry names; a `kapi-` binary prefix is stripped (`kapi-bowrain` → `bowrain`).
 7. **Restore the project parse cache** (when a `kapi.yaml` recipe, or legacy `*.kapi`, is present): restores `.kapi/work/cache/docs` from the job cache, and saves it again at job end under a key unique to the job and run attempt. See [Project parse cache](#project-parse-cache) for what it leaves to `kapi context pull`. Disable with `parse-cache: false`.
 
 ## Caching
 
-The binary is cached keyed on version + OS + arch; plugins are cached keyed on the plugin set + OS + arch. Both skip their download step on a cache hit.
+The binary is cached keyed on version + OS + arch. Plugins are cached keyed on the resolved kapi version, the plugin set, each requested plugin's registry entry, OS and arch, so a cache restores only the plugins a fresh install by that kapi would choose: a new kapi release or a new plugin release starts from an empty plugin cache. Both skip their download step on a cache hit.
 
 ### Project parse cache
 
