@@ -175,14 +175,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { value: "false", want: "restored only" }
-          - { value: "default-branch", want: "${{ github.event_name == 'pull_request' && 'restored only' || 'saved' }}" }
-          - { value: "true", want: "saved" }
+          - { value: "false", want: "false" }
+          # The default branch saves (a push to main, the daily schedule); a
+          # pull request does not.
+          - { value: "default-branch", want: "${{ github.event_name == 'pull_request' && 'false' || 'true' }}" }
+          - { value: "true", want: "true" }
     steps:
       - uses: actions/checkout@v6
 
       - name: Every saving cache step follows the save-cache decision
         run: python3 test/save-cache/restore-only.py action.yml
+
+      - name: The decision over fabricated events, schedule included
+        run: bash test/save-cache/decision.sh
 
       - name: Setup kapi
         id: setup
@@ -197,11 +202,15 @@ jobs:
         env:
           INSTALLED_VERSION: ${{ steps.setup.outputs.version }}
           CACHE_HIT: ${{ steps.setup.outputs.cache-hit }}
+          SAVES: ${{ steps.setup.outputs.saves-cache }}
+          WANT: ${{ matrix.want }}
         run: |
           set -euo pipefail
           test -n "$INSTALLED_VERSION"
           kapi version
           case "$CACHE_HIT" in true|false) ;; *) echo "cache-hit output is '$CACHE_HIT'"; exit 1 ;; esac
+          echo "saves-cache=$SAVES, want $WANT"
+          test "$SAVES" = "$WANT"
 
   test-save-cache-invalid:
     name: "save-cache: an invalid value fails"
