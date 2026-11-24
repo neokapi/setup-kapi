@@ -164,6 +164,71 @@ jobs:
   # job compares its run in the cached project directory with a cold run of a
   # pristine copy, and the comparison covers every command's exit code and
   # output and every file the project holds afterwards.
+  # save-cache decides per run whether the caches are saved. The static test
+  # holds every saving cache step to that decision; the matrix proves the
+  # action loads and installs with each value, and that the decision is right
+  # for this run (a pull request is not the default branch).
+  test-save-cache:
+    name: "save-cache: ${{ matrix.value }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { value: "false", want: "false" }
+          # The default branch saves (a push to main, the daily schedule); a
+          # pull request does not.
+          - { value: "default-branch", want: "${{ github.event_name == 'pull_request' && 'false' || 'true' }}" }
+          - { value: "true", want: "true" }
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Every saving cache step follows the save-cache decision
+        run: python3 test/save-cache/restore-only.py action.yml
+
+      - name: The decision over fabricated events, schedule included
+        run: bash test/save-cache/decision.sh
+
+      - name: Setup kapi
+        id: setup
+        uses: ./
+        with:
+          token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+          plugins: bowrain
+          save-cache: ${{ matrix.value }}
+
+      - name: Verify the install, the decision and the cache-hit output
+        shell: bash
+        env:
+          INSTALLED_VERSION: ${{ steps.setup.outputs.version }}
+          CACHE_HIT: ${{ steps.setup.outputs.cache-hit }}
+          SAVES: ${{ steps.setup.outputs.saves-cache }}
+          WANT: ${{ matrix.want }}
+        run: |
+          set -euo pipefail
+          test -n "$INSTALLED_VERSION"
+          kapi version
+          case "$CACHE_HIT" in true|false) ;; *) echo "cache-hit output is '$CACHE_HIT'"; exit 1 ;; esac
+          echo "saves-cache=$SAVES, want $WANT"
+          test "$SAVES" = "$WANT"
+
+  test-save-cache-invalid:
+    name: "save-cache: an invalid value fails"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup kapi with save-cache maybe
+        id: setup
+        continue-on-error: true
+        uses: ./
+        with:
+          token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+          save-cache: maybe
+      - name: The step failed
+        env:
+          OUTCOME: ${{ steps.setup.outcome }}
+        run: test "$OUTCOME" = failure
+
   test-state-cache-save:
     name: "State cache save (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
