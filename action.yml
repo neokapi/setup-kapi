@@ -54,10 +54,10 @@ inputs:
     default: "."
   save-cache:
     description: >-
-      Save the binary, plugin and parse caches at the end of the job ('true',
-      the default), or only restore them ('false'). A repository where only the
-      default branch saves caches passes
-      `${{ github.ref == 'refs/heads/main' }}`.
+      When to save the binary, plugin and parse caches at the end of the job:
+      'true' saves on every run (the default, as before); 'default-branch'
+      saves only on a run of the repository's default branch and only restores
+      elsewhere; 'false' only restores.
     required: false
     default: "true"
 
@@ -106,9 +106,31 @@ runs:
         echo "ext=${ARCHIVE_EXT}" >> "$GITHUB_OUTPUT"
         echo "Platform: ${GOOS}/${GOARCH} (archive: .${ARCHIVE_EXT})"
 
-    # 3. Restore binary cache
+    # 3. Resolve save-cache to a yes or no for this run. The default branch is
+    #    read from the event, so the action works in any repository.
+    - name: Resolve save-cache
+      id: save
+      shell: bash
+      env:
+        INPUT_SAVE_CACHE: ${{ inputs.save-cache }}
+        REF: ${{ github.ref }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: |
+        case "$INPUT_SAVE_CACHE" in
+          true) save=true ;;
+          false) save=false ;;
+          default-branch)
+            if [ -n "$DEFAULT_BRANCH" ] && [ "$REF" = "refs/heads/$DEFAULT_BRANCH" ]; then save=true; else save=false; fi ;;
+          *)
+            echo "::error title=setup-kapi::save-cache must be true, false or default-branch, not '$INPUT_SAVE_CACHE'"
+            exit 1 ;;
+        esac
+        echo "save=$save" >> "$GITHUB_OUTPUT"
+        echo "save-cache=$INPUT_SAVE_CACHE: caches are $([ "$save" = true ] && echo saved || echo restored only) on this run"
+
+    # 3b. Restore binary cache
     - name: Restore binary cache
-      if: inputs.save-cache != 'false'
+      if: steps.save.outputs.save == 'true'
       id: binary-cache
       uses: actions/cache@v5
       with:
@@ -116,7 +138,7 @@ runs:
         key: kapi-${{ steps.resolve.outputs.version }}-${{ runner.os }}-${{ runner.arch }}
 
     - name: Restore binary cache (no save)
-      if: inputs.save-cache == 'false'
+      if: steps.save.outputs.save != 'true'
       id: binary-cache-restore
       uses: actions/cache/restore@v5
       with:
@@ -200,7 +222,7 @@ runs:
 
     # 9. Restore plugin cache
     - name: Restore plugin cache
-      if: inputs.plugins != '' && inputs.save-cache != 'false'
+      if: inputs.plugins != '' && steps.save.outputs.save == 'true'
       id: plugin-cache
       uses: actions/cache@v5
       with:
@@ -216,7 +238,7 @@ runs:
         key: kapi-plugins-v2-${{ steps.plugin-hash.outputs.hash }}-${{ runner.os }}-${{ runner.arch }}
 
     - name: Restore plugin cache (no save)
-      if: inputs.plugins != '' && inputs.save-cache == 'false'
+      if: inputs.plugins != '' && steps.save.outputs.save != 'true'
       id: plugin-cache-restore
       uses: actions/cache/restore@v5
       with:
@@ -382,7 +404,7 @@ runs:
     #     the default (or base) branch's scope and often on behalf of someone
     #     who cannot push, so there the cache is restored and never saved.
     - name: Restore kapi parse cache
-      if: steps.parse-cache-dir.outputs.dir != '' && inputs.save-cache != 'false' && !contains(fromJSON('["pull_request_target","workflow_run","issue_comment"]'), github.event_name)
+      if: steps.parse-cache-dir.outputs.dir != '' && steps.save.outputs.save == 'true' && !contains(fromJSON('["pull_request_target","workflow_run","issue_comment"]'), github.event_name)
       uses: actions/cache@v5
       with:
         path: |
@@ -394,7 +416,7 @@ runs:
           kapi-parse-${{ runner.os }}-${{ steps.resolve.outputs.version }}_
 
     - name: Restore kapi parse cache (no save)
-      if: steps.parse-cache-dir.outputs.dir != '' && (inputs.save-cache == 'false' || contains(fromJSON('["pull_request_target","workflow_run","issue_comment"]'), github.event_name))
+      if: steps.parse-cache-dir.outputs.dir != '' && (steps.save.outputs.save != 'true' || contains(fromJSON('["pull_request_target","workflow_run","issue_comment"]'), github.event_name))
       uses: actions/cache/restore@v5
       with:
         path: |
