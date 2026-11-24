@@ -164,6 +164,38 @@ jobs:
   # job compares its run in the cached project directory with a cold run of a
   # pristine copy, and the comparison covers every command's exit code and
   # output and every file the project holds afterwards.
+  # save-cache: 'false' restores the caches and saves none. The static test
+  # holds every saving cache step to the input; the run proves the action
+  # still installs and reports a cache hit through the restore-only steps.
+  test-save-cache-off:
+    name: "save-cache: false"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Every saving cache step is skipped with save-cache false
+        run: python3 test/save-cache/restore-only.py action.yml
+
+      - name: Setup kapi, restoring only
+        id: setup
+        uses: ./
+        with:
+          token: ${{ secrets.NEOKAPI_GITHUB_TOKEN }}
+          plugins: bowrain
+          save-cache: "false"
+
+      - name: Verify the install and the cache-hit output
+        shell: bash
+        env:
+          INSTALLED_VERSION: ${{ steps.setup.outputs.version }}
+          CACHE_HIT: ${{ steps.setup.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          test -n "$INSTALLED_VERSION"
+          kapi version
+          echo "plugin cache hit: ${CACHE_HIT:-<empty>}"
+          case "$CACHE_HIT" in true|false) ;; *) echo "cache-hit output is '$CACHE_HIT'"; exit 1 ;; esac
+
   test-state-cache-save:
     name: "State cache save (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
