@@ -61,6 +61,7 @@ steps:
 | `server` | Bowrain server URL, exported as `BOWRAIN_SERVER_URL` | — | No |
 | `parse-cache` | Keep kapi's parse cache between runs, so a later run replays files it already parsed; see [Project parse cache](#project-parse-cache). Runs only when a `kapi.yaml` recipe (or legacy `*.kapi`) is present. Set `false` to turn it off | `true` | No |
 | `cache-tm` | Deprecated name of `parse-cache`. When set, it decides in place of `parse-cache`, and the action prints a warning | `''` | No |
+| `save-cache` | Save the binary, plugin and parse caches when the job ends (`true`), or only restore them (`false`). A repository where only the default branch saves caches passes `${{ github.ref == 'refs/heads/main' }}` | `true` | No |
 | `project-dir` | Directory holding the `kapi.yaml` project whose parse cache is kept between runs | `.` | No |
 
 ## Outputs
