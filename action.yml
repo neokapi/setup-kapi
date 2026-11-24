@@ -52,6 +52,14 @@ inputs:
     description: "Directory holding the kapi.yaml project whose parse cache is kept between runs. Default: repository root."
     required: false
     default: "."
+  save-cache:
+    description: >-
+      Save the binary, plugin and parse caches at the end of the job ('true',
+      the default), or only restore them ('false'). A repository where only the
+      default branch saves caches passes
+      `${{ github.ref == 'refs/heads/main' }}`.
+    required: false
+    default: "true"
 
 outputs:
   version:
@@ -59,7 +67,7 @@ outputs:
     value: ${{ steps.resolve.outputs.version }}
   cache-hit:
     description: "Whether the plugin cache was hit"
-    value: ${{ steps.plugin-cache.outputs.cache-hit }}
+    value: ${{ steps.plugin-cache.outputs.cache-hit || steps.plugin-cache-restore.outputs.cache-hit }}
 
 runs:
   using: "composite"
@@ -100,15 +108,24 @@ runs:
 
     # 3. Restore binary cache
     - name: Restore binary cache
+      if: inputs.save-cache != 'false'
       id: binary-cache
       uses: actions/cache@v5
       with:
         path: ${{ runner.temp }}/setup-kapi
         key: kapi-${{ steps.resolve.outputs.version }}-${{ runner.os }}-${{ runner.arch }}
 
+    - name: Restore binary cache (no save)
+      if: inputs.save-cache == 'false'
+      id: binary-cache-restore
+      uses: actions/cache/restore@v5
+      with:
+        path: ${{ runner.temp }}/setup-kapi
+        key: kapi-${{ steps.resolve.outputs.version }}-${{ runner.os }}-${{ runner.arch }}
+
     # 4. Download + verify (on cache miss)
     - name: Download and verify
-      if: steps.binary-cache.outputs.cache-hit != 'true'
+      if: steps.binary-cache.outputs.cache-hit != 'true' && steps.binary-cache-restore.outputs.cache-hit != 'true'
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.token }}
@@ -183,7 +200,7 @@ runs:
 
     # 9. Restore plugin cache
     - name: Restore plugin cache
-      if: inputs.plugins != ''
+      if: inputs.plugins != '' && inputs.save-cache != 'false'
       id: plugin-cache
       uses: actions/cache@v5
       with:
@@ -198,9 +215,25 @@ runs:
         # another kapi or an older registry entry.
         key: kapi-plugins-v2-${{ steps.plugin-hash.outputs.hash }}-${{ runner.os }}-${{ runner.arch }}
 
+    - name: Restore plugin cache (no save)
+      if: inputs.plugins != '' && inputs.save-cache == 'false'
+      id: plugin-cache-restore
+      uses: actions/cache/restore@v5
+      with:
+        # kapi installs plugins under $XDG_DATA_HOME/kapi/plugins — i.e.
+        # ~/.local/share/kapi/plugins when XDG_DATA_HOME is unset, as it is on a
+        # runner. The old ~/.config/kapi/plugins is the CONFIG dir: nothing was
+        # ever written there, so the cache saved an empty path and every run
+        # re-downloaded every plugin.
+        path: ~/.local/share/kapi/plugins
+        #
+        # No restore-keys: a partial match would restore plugins chosen for
+        # another kapi or an older registry entry.
+        key: kapi-plugins-v2-${{ steps.plugin-hash.outputs.hash }}-${{ runner.os }}-${{ runner.arch }}
+
     # 10. Install plugins (on cache miss)
     - name: Install plugins
-      if: inputs.plugins != '' && steps.plugin-cache.outputs.cache-hit != 'true'
+      if: inputs.plugins != '' && steps.plugin-cache.outputs.cache-hit != 'true' && steps.plugin-cache-restore.outputs.cache-hit != 'true'
       shell: bash
       env:
         INPUT_PLUGINS: ${{ inputs.plugins }}
@@ -349,7 +382,7 @@ runs:
     #     the default (or base) branch's scope and often on behalf of someone
     #     who cannot push, so there the cache is restored and never saved.
     - name: Restore kapi parse cache
-      if: steps.parse-cache-dir.outputs.dir != '' && !contains(fromJSON('["pull_request_target","workflow_run","issue_comment"]'), github.event_name)
+      if: steps.parse-cache-dir.outputs.dir != '' && inputs.save-cache != 'false' && !contains(fromJSON('["pull_request_target","workflow_run","issue_comment"]'), github.event_name)
       uses: actions/cache@v5
       with:
         path: |
@@ -361,7 +394,7 @@ runs:
           kapi-parse-${{ runner.os }}-${{ steps.resolve.outputs.version }}_
 
     - name: Restore kapi parse cache (no save)
-      if: steps.parse-cache-dir.outputs.dir != '' && contains(fromJSON('["pull_request_target","workflow_run","issue_comment"]'), github.event_name)
+      if: steps.parse-cache-dir.outputs.dir != '' && (inputs.save-cache == 'false' || contains(fromJSON('["pull_request_target","workflow_run","issue_comment"]'), github.event_name))
       uses: actions/cache/restore@v5
       with:
         path: |
